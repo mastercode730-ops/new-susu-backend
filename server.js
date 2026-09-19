@@ -8,7 +8,8 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors({
-  origin: '*',
+  origin: true,
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
@@ -16,6 +17,23 @@ app.use(cors({
 app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Normalize /sapi prefix if forwarded by reverse proxy (e.g. Nginx proxy_pass without trailing slash)
+app.use((req, res, next) => {
+  if (req.url.startsWith('/sapi')) {
+    req.url = req.url.slice(5) || '/';
+  }
+  next();
+});
+
+// Root ping
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Susu9 Mobile API is running',
+    version: '1.0.0'
+  });
+});
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
