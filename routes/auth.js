@@ -4,8 +4,10 @@ const jwt = require('jsonwebtoken');
 const { executeStoredProcedure, executeQuery } = require('../config/database');
 const { requireAuth } = require('../middleware/auth');
 
+const JWT_SECRET = process.env.JWT_SECRET || 'susu9_mobile_jwt_secret_2024_xK9mP';
+
 function generateToken(payload) {
-  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
 }
 
 async function bindAccessRight(staffID) {
