@@ -1,0 +1,59 @@
+const express = require('express');
+const cors = require('cors');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+app.use(compression());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  message: { success: false, message: 'Too many requests, please try again later.' }
+});
+app.use('/api/', limiter);
+
+// Routes
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/home', require('./routes/home'));
+app.use('/api/game', require('./routes/game'));
+app.use('/api/customer', require('./routes/customer'));
+app.use('/api/chat', require('./routes/chat'));
+app.use('/api/hisab', require('./routes/hisab'));
+app.use('/api/balance', require('./routes/balance'));
+app.use('/api/accounts', require('./routes/accounts'));
+app.use('/api/received', require('./routes/received'));
+app.use('/api/lc', require('./routes/lc'));
+app.use('/api/yantri', require('./routes/yantri'));
+app.use('/api/admin', require('./routes/admin'));
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Susu9 Mobile API is running',
+    version: '1.0.0',
+    database: process.env.DB_DATABASE,
+    server: process.env.DB_SERVER,
+    port: process.env.PORT || 3001,
+  });
+});
+
+app.use((err, req, res, next) => {
+  console.error('Server error:', err);
+  res.status(500).json({ success: false, message: 'Internal server error' });
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 Susu9 Mobile API running on port ${PORT}`);
+});
