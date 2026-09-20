@@ -443,7 +443,7 @@ router.post('/move-message', requireAuth, async (req, res) => {
     const uid = req.user.UID;
     const subUID = req.user.SubUID || '';
     const {
-      gameID, selectedUID, mobile, msgDate, currentMsgDate, currentGameID,
+      gameID, selectedUID, mobile, targetUID, msgDate, currentMsgDate, currentGameID,
       src_D_PComm, src_D_Amt, src_A_PComm, src_A_Amt, src_Pati_PComm,
       fHissaPartyID, hissaPerc, D_PComm, D_Amt, A_PComm, A_Amt, Pati_PComm
     } = req.body;
@@ -452,12 +452,17 @@ router.post('/move-message', requireAuth, async (req, res) => {
 
     function parseDate(s) {
       if (!s) return new Date();
-      const mo = { Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11 };
-      const m1 = String(s).match(/^(\d{1,2})\/([A-Za-z]{3})\/(\d{4})/);
-      if (m1 && mo[m1[2]] !== undefined) return new Date(Date.UTC(+m1[3], mo[m1[2]], +m1[1]));
-      const iso = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (s instanceof Date) return isNaN(s.getTime()) ? new Date() : s;
+      const str = String(s).trim();
+      const mo = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
+      const m1 = str.match(/^(\d{1,2})[\/\-]([A-Za-z]{3})[\/\-](\d{4})/);
+      if (m1 && mo[m1[2].toLowerCase()] !== undefined) return new Date(Date.UTC(+m1[3], mo[m1[2].toLowerCase()], +m1[1]));
+      const iso = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
       if (iso) return new Date(Date.UTC(+iso[1], +iso[2]-1, +iso[3]));
-      return new Date(s);
+      const dmy = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+      if (dmy) return new Date(Date.UTC(+dmy[3], +dmy[2]-1, +dmy[1]));
+      const d = new Date(str);
+      return isNaN(d) ? new Date() : d;
     }
 
     const parsedFrom = parseDate(msgDate);
@@ -480,8 +485,11 @@ router.post('/move-message', requireAuth, async (req, res) => {
       if (!srcRows || !srcRows.length)
         return res.json({ success: false, message: 'Is rate ke liye koi message nahi mila' });
 
-      const toUserRows = await executeQuery(`SELECT UID FROM Users WHERE Mobile=@mobile`, { mobile: String(mobile) });
-      const toUID = toUserRows?.[0]?.UID;
+      let toUID = targetUID;
+      if (!toUID && mobile) {
+        const toUserRows = await executeQuery(`SELECT UID FROM Users WHERE Mobile=@mobile`, { mobile: String(mobile) });
+        toUID = toUserRows?.[0]?.UID;
+      }
       if (!toUID) return res.json({ success: false, message: 'TO customer ka UID nahi mila' });
 
       for (const row of srcRows) {
@@ -506,7 +514,7 @@ router.post('/move-message', requireAuth, async (req, res) => {
         MsgDate: parsedFrom, CurrentMsgDate: parsedTo, MsgdateTime: msgDateTime
       });
     }
-    res.json({ success: true, message: 'Data Move Sucessfully' });
+    res.json({ success: true, message: 'Data Move Successfully' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -518,7 +526,7 @@ router.post('/copy-message', requireAuth, async (req, res) => {
     const uid = req.user.UID;
     const subUID = req.user.SubUID || '';
     const {
-      selectedUID, gameID, msgDate, currentGameID, currentMsgDate, targetUID,
+      selectedUID, gameID, msgDate, currentGameID, currentMsgDate, targetUID, mobile,
       src_D_PComm, src_D_Amt, src_A_PComm, src_A_Amt, src_Pati_PComm,
       D_PComm, D_Amt, A_PComm, A_Amt, Pati_PComm,
       fHissaPartyID, hissaPerc,
@@ -527,17 +535,29 @@ router.post('/copy-message', requireAuth, async (req, res) => {
 
     function parseDate(s) {
       if (!s) return new Date();
-      const mo = { Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11 };
-      const m1 = String(s).match(/^(\d{1,2})\/([A-Za-z]{3})\/(\d{4})/);
-      if (m1 && mo[m1[2]] !== undefined) return new Date(Date.UTC(+m1[3], mo[m1[2]], +m1[1]));
-      const iso = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (s instanceof Date) return isNaN(s.getTime()) ? new Date() : s;
+      const str = String(s).trim();
+      const mo = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
+      const m1 = str.match(/^(\d{1,2})[\/\-]([A-Za-z]{3})[\/\-](\d{4})/);
+      if (m1 && mo[m1[2].toLowerCase()] !== undefined) return new Date(Date.UTC(+m1[3], mo[m1[2].toLowerCase()], +m1[1]));
+      const iso = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
       if (iso) return new Date(Date.UTC(+iso[1], +iso[2]-1, +iso[3]));
-      return new Date(s);
+      const dmy = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+      if (dmy) return new Date(Date.UTC(+dmy[3], +dmy[2]-1, +dmy[1]));
+      const d = new Date(str);
+      return isNaN(d) ? new Date() : d;
     }
 
     const msgDateTime = formatDateTime(getIndianTime());
     const parsedMsgDate = parseDate(msgDate);
     const parsedCurrentDate = parseDate(currentMsgDate);
+
+    let resolvedTargetUID = targetUID;
+    if (!resolvedTargetUID && mobile) {
+      const uRows = await executeQuery(`SELECT UID FROM Users WHERE Mobile=@mobile`, { mobile: String(mobile) });
+      resolvedTargetUID = uRows?.[0]?.UID;
+    }
+    if (!resolvedTargetUID) return res.json({ success: false, message: 'Target customer UID nahi mila' });
 
     const copyData = await executeStoredProcedure('SelectForCopyChatMessage', {
       UserID: uid, SelectedUID: selectedUID, GameID: gameID, MsgDate: parsedMsgDate
@@ -563,7 +583,7 @@ router.post('/copy-message', requireAuth, async (req, res) => {
     for (const row of filteredData) {
       await executeStoredProcedure('InsertChatMessageWhatsappLike', {
         fSenderID: uid,
-        fReceiverID: parseInt(targetUID),
+        fReceiverID: parseInt(resolvedTargetUID),
         fGameID: parseInt(currentGameID),
         Message: row.Message,
         MessageDateTime: msgDateTime,
@@ -586,7 +606,7 @@ router.post('/copy-message', requireAuth, async (req, res) => {
         ThirdPartyAkharComm: parseFloat(ThirdPartyAkharComm) || 0
       });
     }
-    res.json({ success: true, message: 'Data Copy Sucessfully' });
+    res.json({ success: true, message: 'Data Copy Successfully' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
