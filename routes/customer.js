@@ -37,17 +37,17 @@ router.post('/', requireAuth, async (req, res) => {
     const mob = mobileNo || mobile;
     if (!customerName || !mob) return res.status(400).json({ success: false, message: 'Name and mobile required' });
     await executeStoredProcedure('CreateCustomers', {
-      CustomerName: customerName, Mobile: mob, City: city || null,
-      D_PComm: d_PComm || 0, D_Amt: d_Amt || 100, A_PComm: a_PComm || 0, A_Amt: a_Amt || 10,
-      Patti: patti || 0, LC: lc || 0,
+      CustomerName: customerName, Mobile: mob,
+      D_PComm: parseFloat(d_PComm) || 0, D_Amt: parseFloat(d_Amt) || 100, A_PComm: parseFloat(a_PComm) || 0, A_Amt: parseFloat(a_Amt) || 10,
+      Patti: parseInt(patti) || 0, LC: parseInt(lc) || 0,
       IsSelfComm: isSelfComm ? true : false,
       IsYantriTo: isYantriTo ? true : false,
-      fId: uid, CID: '', UserID: uid, RateID: 0,
-      ThirdPartyHissaID: thirdPartyHissaID || 0, ThirdPartyHissaPer: thirdPartyHissaPer || 0,
+      fId: uid, CID: 0, UserID: uid, RateID: 0,
+      ThirdPartyHissaID: parseInt(thirdPartyHissaID) || 0, ThirdPartyHissaPer: parseFloat(thirdPartyHissaPer) || 0,
       IsLimit: isLimit ? true : false, IsUttar: isUttar ? true : false,
-      ThirdPartyCommID: thirdPartyCommID || 0, ThirdPartyDaraComm: thirdPartyDaraComm || 0,
-      ThirdPartyAkharComm: thirdPartyAkharComm || 0,
-      ThirdPartyLCID: thirdPartyLCID || 0, ThirdPartyLCPer: thirdPartyLCPer || 0
+      ThirdPartyCommID: parseInt(thirdPartyCommID) || 0, ThirdPartyDaraComm: parseFloat(thirdPartyDaraComm) || 0,
+      ThirdPartyAkharComm: parseFloat(thirdPartyAkharComm) || 0,
+      ThirdPartyLCID: parseInt(thirdPartyLCID) || 0, ThirdPartyLCPer: parseFloat(thirdPartyLCPer) || 0
     });
     res.json({ success: true, message: 'Customer added' });
   } catch (err) {
@@ -69,17 +69,17 @@ router.post('/update', requireAuth, async (req, res) => {
     const mob = mobileNo || mobile;
     if (!cid) return res.status(400).json({ success: false, message: 'CID required' });
     await executeStoredProcedure('UpdateCustomers', {
-      CustomerName: customerName, Mobile: mob, City: city || null,
-      D_PComm: d_PComm || 0, D_Amt: d_Amt || 100, A_PComm: a_PComm || 0, A_Amt: a_Amt || 10,
-      Patti: patti || 0, LC: lc || 0,
+      CustomerName: customerName, Mobile: mob,
+      D_PComm: parseFloat(d_PComm) || 0, D_Amt: parseFloat(d_Amt) || 100, A_PComm: parseFloat(a_PComm) || 0, A_Amt: parseFloat(a_Amt) || 10,
+      Patti: parseInt(patti) || 0, LC: parseInt(lc) || 0,
       IsSelfComm: isSelfComm ? true : false,
       IsYantriTo: isYantriTo ? true : false,
-      fId: uid, CID: cid, UserID: uid, RateID: 0,
-      ThirdPartyHissaID: thirdPartyHissaID || 0, ThirdPartyHissaPer: thirdPartyHissaPer || 0,
+      fId: uid, CID: parseInt(cid), UserID: uid, RateID: 0,
+      ThirdPartyHissaID: parseInt(thirdPartyHissaID) || 0, ThirdPartyHissaPer: parseFloat(thirdPartyHissaPer) || 0,
       IsLimit: isLimit ? true : false, IsUttar: isUttar ? true : false,
-      ThirdPartyCommID: thirdPartyCommID || 0, ThirdPartyDaraComm: thirdPartyDaraComm || 0,
-      ThirdPartyAkharComm: thirdPartyAkharComm || 0,
-      ThirdPartyLCID: thirdPartyLCID || 0, ThirdPartyLCPer: thirdPartyLCPer || 0
+      ThirdPartyCommID: parseInt(thirdPartyCommID) || 0, ThirdPartyDaraComm: parseFloat(thirdPartyDaraComm) || 0,
+      ThirdPartyAkharComm: parseFloat(thirdPartyAkharComm) || 0,
+      ThirdPartyLCID: parseInt(thirdPartyLCID) || 0, ThirdPartyLCPer: parseFloat(thirdPartyLCPer) || 0
     });
     res.json({ success: true, message: 'Customer updated' });
   } catch (err) {
