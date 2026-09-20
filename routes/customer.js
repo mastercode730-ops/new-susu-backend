@@ -91,7 +91,13 @@ router.post('/update', requireAuth, async (req, res) => {
 router.get('/:cid/rates', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
-    const data = await executeQuery(`SELECT * FROM CustomersRates WHERE CID=@cid AND fUID=@uid`, { cid: parseInt(req.params.cid), uid });
+    const data = await executeQuery(
+      `SELECT CR.*,
+              (SELECT TOP 1 UID FROM Users WHERE Mobile = CR.MobileNo OR REPLACE(Mobile, ' ', '') = REPLACE(CR.MobileNo, ' ', '')) AS fUserUID
+       FROM CustomersRates CR 
+       WHERE CR.CID = @cid AND CR.fUID = @uid`,
+      { cid: parseInt(req.params.cid), uid }
+    );
     res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -102,7 +108,13 @@ router.get('/:cid/rates', requireAuth, async (req, res) => {
 router.get('/rates/:cid', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
-    const data = await executeQuery(`SELECT * FROM CustomersRates WHERE CID=@cid AND fUID=@uid`, { cid: parseInt(req.params.cid), uid });
+    const data = await executeQuery(
+      `SELECT CR.*,
+              (SELECT TOP 1 UID FROM Users WHERE Mobile = CR.MobileNo OR REPLACE(Mobile, ' ', '') = REPLACE(CR.MobileNo, ' ', '')) AS fUserUID
+       FROM CustomersRates CR 
+       WHERE CR.CID = @cid AND CR.fUID = @uid`,
+      { cid: parseInt(req.params.cid), uid }
+    );
     res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

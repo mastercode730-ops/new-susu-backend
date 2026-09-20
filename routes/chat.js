@@ -81,20 +81,21 @@ router.get('/received', requireAuth, async (req, res) => {
       if (uRows && uRows.length > 0) fReceiverID = uRows[0].UID;
     }
 
-    // Parse date — support ISO "2026-06-29" and Indian "29/Jun/2026" formats
-    let parsedDate = new Date();
+    // Parse date — support ISO "YYYY-MM-DD", Indian "20/Sep/2026", and DMY "20/09/2026"
+    let parsedDate = '';
     if (date) {
-      const iso = String(date).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      const iso = String(date).match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
       const indian = String(date).match(/^(\d{1,2})[\/-](\w{3})[\/-](\d{4})/i);
-      const months = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
-      if (iso) parsedDate = new Date(Date.UTC(+iso[1], +iso[2]-1, +iso[3]));
-      else if (indian) {
-        const mon = months[indian[2].toLowerCase()];
-        if (mon !== undefined) parsedDate = new Date(Date.UTC(+indian[3], mon, +indian[1]));
-      } else {
-        const d = new Date(date);
-        if (!isNaN(d)) parsedDate = d;
-      }
+      const dmy = String(date).match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
+      const months = { jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12' };
+      if (iso) parsedDate = `${iso[1]}-${String(iso[2]).padStart(2, '0')}-${String(iso[3]).padStart(2, '0')}`;
+      else if (indian && months[indian[2].toLowerCase()]) parsedDate = `${indian[3]}-${months[indian[2].toLowerCase()]}-${String(indian[1]).padStart(2, '0')}`;
+      else if (dmy) parsedDate = `${dmy[3]}-${String(dmy[2]).padStart(2, '0')}-${String(dmy[1]).padStart(2, '0')}`;
+      else parsedDate = String(date).substring(0, 10);
+    }
+    if (!parsedDate) {
+      const ist = new Date(Date.now() + 5.5 * 3600000);
+      parsedDate = `${ist.getUTCFullYear()}-${String(ist.getUTCMonth()+1).padStart(2,'0')}-${String(ist.getUTCDate()).padStart(2,'0')}`;
     }
 
     const data = await executeStoredProcedure('FetchSenderMessageWhatsAppLike', {
@@ -448,6 +449,24 @@ router.get('/refresh-status', requireAuth, async (req, res) => {
   }
 });
 
+// Helper: normalize any date format to YYYY-MM-DD string
+function formatDateStr(s) {
+  if (!s) return '';
+  if (s instanceof Date) {
+    if (isNaN(s.getTime())) return '';
+    return s.toISOString().split('T')[0];
+  }
+  const str = String(s).trim();
+  const iso = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+  if (iso) return `${iso[1]}-${String(iso[2]).padStart(2, '0')}-${String(iso[3]).padStart(2, '0')}`;
+  const dmy = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (dmy) return `${dmy[3]}-${String(dmy[2]).padStart(2, '0')}-${String(dmy[1]).padStart(2, '0')}`;
+  const mo = { jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12' };
+  const m1 = str.match(/^(\d{1,2})[\/\-]([A-Za-z]{3})[\/\-](\d{4})/i);
+  if (m1 && mo[m1[2].toLowerCase()]) return `${m1[3]}-${mo[m1[2].toLowerCase()]}-${String(m1[1]).padStart(2, '0')}`;
+  return str.substring(0, 10);
+}
+
 // POST /api/chat/move-message
 router.post('/move-message', requireAuth, async (req, res) => {
   try {
@@ -459,59 +478,89 @@ router.post('/move-message', requireAuth, async (req, res) => {
       fHissaPartyID, hissaPerc, D_PComm, D_Amt, A_PComm, A_Amt, Pati_PComm
     } = req.body;
 
+    const fromDateStr = formatDateStr(msgDate);
+    const toDateStr   = formatDateStr(currentMsgDate);
     const msgDateTime = formatDateTime(getIndianTime());
 
-    function parseDate(s) {
-      if (!s) return new Date();
-      if (s instanceof Date) return isNaN(s.getTime()) ? new Date() : s;
-      const str = String(s).trim();
-      const mo = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
-      const m1 = str.match(/^(\d{1,2})[\/\-]([A-Za-z]{3})[\/\-](\d{4})/);
-      if (m1 && mo[m1[2].toLowerCase()] !== undefined) return new Date(Date.UTC(+m1[3], mo[m1[2].toLowerCase()], +m1[1]));
-      const iso = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
-      if (iso) return new Date(Date.UTC(+iso[1], +iso[2]-1, +iso[3]));
-      const dmy = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-      if (dmy) return new Date(Date.UTC(+dmy[3], +dmy[2]-1, +dmy[1]));
-      const d = new Date(str);
-      return isNaN(d) ? new Date() : d;
+    // Resolve target customer UID:
+    // ALWAYS look up Users by mobile if provided to get the real customer UID (not the dealer UID)
+    let toUID = null;
+    if (mobile) {
+      const cleanMob = String(mobile).replace(/\D/g, '').slice(-10);
+      const toUserRows = await executeQuery(
+        `SELECT TOP 1 UID FROM Users WHERE Mobile = @mobile OR REPLACE(Mobile, ' ', '') = @cleanMob`,
+        { mobile: String(mobile).trim(), cleanMob }
+      );
+      if (toUserRows && toUserRows.length > 0) toUID = toUserRows[0].UID;
     }
-
-    const parsedFrom = parseDate(msgDate);
-    const parsedTo   = parseDate(currentMsgDate);
+    if (!toUID && targetUID && String(targetUID) !== String(uid)) {
+      toUID = targetUID;
+    }
+    if (!toUID && selectedUID && String(selectedUID) !== String(uid)) {
+      toUID = selectedUID;
+    }
+    if (!toUID) return res.json({ success: false, message: 'TO customer ka UID nahi mila' });
 
     if (src_D_PComm !== undefined) {
       const tol = 0.01;
       const srcRows = await executeQuery(
-        `SELECT ChatID FROM Chat WHERE fGameID=@gameID AND fSenderID=@selectedUID AND fReceiverID=@uid
-           AND CAST(MsgDate AS date)=CAST(@msgDate AS date)
-           AND ABS(ISNULL(D_PComm,0)-@dPC)<${tol} AND ABS(ISNULL(D_Amt,0)-@dA)<${tol}
-           AND ABS(ISNULL(A_PComm,0)-@aPC)<${tol} AND ABS(ISNULL(A_Amt,0)-@aA)<${tol}
-           AND ABS(ISNULL(Pati_PComm,0)-@pati)<${tol}`,
-        { gameID: parseInt(gameID), selectedUID: parseInt(selectedUID), uid,
-          msgDate: parsedFrom,
-          dPC: parseFloat(src_D_PComm)||0, dA: parseFloat(src_D_Amt)||0,
-          aPC: parseFloat(src_A_PComm)||0, aA: parseFloat(src_A_Amt)||0,
-          pati: parseFloat(src_Pati_PComm)||0 }
+        `SELECT ChatID FROM Chat 
+         WHERE fGameID = @gameID 
+           AND (
+             (fSenderID = @selectedUID AND fReceiverID = @uid)
+             OR
+             (fSenderID = @uid AND fReceiverID = @selectedUID)
+           )
+           AND CAST(MsgDate AS date) = CAST(@msgDate AS date)
+           AND ABS(ISNULL(D_PComm,0) - @dPC) < ${tol} 
+           AND ABS(ISNULL(D_Amt,0) - @dA) < ${tol}
+           AND ABS(ISNULL(A_PComm,0) - @aPC) < ${tol} 
+           AND ABS(ISNULL(A_Amt,0) - @aA) < ${tol}
+           AND ABS(ISNULL(Pati_PComm,0) - @pati) < ${tol}`,
+        {
+          gameID: parseInt(gameID),
+          selectedUID: parseInt(selectedUID),
+          uid: parseInt(uid),
+          msgDate: fromDateStr,
+          dPC: parseFloat(src_D_PComm) || 0,
+          dA: parseFloat(src_D_Amt) || 100,
+          aPC: parseFloat(src_A_PComm) || 0,
+          aA: parseFloat(src_A_Amt) || 10,
+          pati: parseFloat(src_Pati_PComm) || 0
+        }
       );
       if (!srcRows || !srcRows.length)
         return res.json({ success: false, message: 'Is rate ke liye koi message nahi mila' });
 
-      let toUID = targetUID;
-      if (!toUID && mobile) {
-        const toUserRows = await executeQuery(`SELECT UID FROM Users WHERE Mobile=@mobile`, { mobile: String(mobile) });
-        toUID = toUserRows?.[0]?.UID;
-      }
-      if (!toUID) return res.json({ success: false, message: 'TO customer ka UID nahi mila' });
-
       for (const row of srcRows) {
         await executeQuery(
-          `UPDATE Chat SET fSenderID=@toUID, fGameID=@newGame, MsgDate=@newDate,
-           MessageDateTime=@dt, D_PComm=@dPC, D_Amt=@dA, A_PComm=@aPC, A_Amt=@aA, Pati_PComm=@pati
-           WHERE ChatID=@chatID`,
-          { toUID: parseInt(toUID), newGame: parseInt(currentGameID), newDate: parsedTo, dt: msgDateTime,
-            dPC: parseFloat(D_PComm)||0, dA: parseFloat(D_Amt)||100,
-            aPC: parseFloat(A_PComm)||0, aA: parseFloat(A_Amt)||10,
-            pati: parseFloat(Pati_PComm)||0, chatID: row.ChatID }
+          `UPDATE Chat 
+           SET fSenderID = @toUID,
+               fReceiverID = @uid,
+               fGameID = @newGame,
+               MsgDate = @newDate,
+               MessageDateTime = @dt,
+               D_PComm = @dPC, D_Amt = @dA,
+               A_PComm = @aPC, A_Amt = @aA,
+               Pati_PComm = @pati,
+               fHissaPartyID = @hissaID,
+               HissaPerc = @hissaPer
+           WHERE ChatID = @chatID`,
+          {
+            toUID: parseInt(toUID),
+            uid: parseInt(uid),
+            newGame: parseInt(currentGameID),
+            newDate: toDateStr,
+            dt: msgDateTime,
+            dPC: parseFloat(D_PComm) || 0,
+            dA: parseFloat(D_Amt) || 100,
+            aPC: parseFloat(A_PComm) || 0,
+            aA: parseFloat(A_Amt) || 10,
+            pati: parseFloat(Pati_PComm) || 0,
+            hissaID: parseInt(fHissaPartyID) || 0,
+            hissaPer: parseFloat(hissaPerc) || 0,
+            chatID: row.ChatID
+          }
         );
       }
     } else {
@@ -522,7 +571,7 @@ router.post('/move-message', requireAuth, async (req, res) => {
         D_PComm: parseFloat(D_PComm) || 0, D_Amt: parseFloat(D_Amt) || 100,
         A_PComm: parseFloat(A_PComm) || 0, A_Amt: parseFloat(A_Amt) || 10,
         Pati_PComm: parseFloat(Pati_PComm) || 0,
-        MsgDate: parsedFrom, CurrentMsgDate: parsedTo, MsgdateTime: msgDateTime
+        MsgDate: fromDateStr, CurrentMsgDate: toDateStr, MsgdateTime: msgDateTime
       });
     }
     res.json({ success: true, message: 'Data Move Successfully' });
@@ -544,57 +593,84 @@ router.post('/copy-message', requireAuth, async (req, res) => {
       ThirdPartyCommID, ThirdPartyDaraComm, ThirdPartyAkharComm
     } = req.body;
 
-    function parseDate(s) {
-      if (!s) return new Date();
-      if (s instanceof Date) return isNaN(s.getTime()) ? new Date() : s;
-      const str = String(s).trim();
-      const mo = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
-      const m1 = str.match(/^(\d{1,2})[\/\-]([A-Za-z]{3})[\/\-](\d{4})/);
-      if (m1 && mo[m1[2].toLowerCase()] !== undefined) return new Date(Date.UTC(+m1[3], mo[m1[2].toLowerCase()], +m1[1]));
-      const iso = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
-      if (iso) return new Date(Date.UTC(+iso[1], +iso[2]-1, +iso[3]));
-      const dmy = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-      if (dmy) return new Date(Date.UTC(+dmy[3], +dmy[2]-1, +dmy[1]));
-      const d = new Date(str);
-      return isNaN(d) ? new Date() : d;
-    }
-
+    const fromDateStr = formatDateStr(msgDate);
+    const toDateStr   = formatDateStr(currentMsgDate);
     const msgDateTime = formatDateTime(getIndianTime());
-    const parsedMsgDate = parseDate(msgDate);
-    const parsedCurrentDate = parseDate(currentMsgDate);
 
-    let resolvedTargetUID = targetUID;
-    if (!resolvedTargetUID && mobile) {
-      const uRows = await executeQuery(`SELECT UID FROM Users WHERE Mobile=@mobile`, { mobile: String(mobile) });
-      resolvedTargetUID = uRows?.[0]?.UID;
+    let toUID = null;
+    if (mobile) {
+      const cleanMob = String(mobile).replace(/\D/g, '').slice(-10);
+      const toUserRows = await executeQuery(
+        `SELECT TOP 1 UID FROM Users WHERE Mobile = @mobile OR REPLACE(Mobile, ' ', '') = @cleanMob`,
+        { mobile: String(mobile).trim(), cleanMob }
+      );
+      if (toUserRows && toUserRows.length > 0) toUID = toUserRows[0].UID;
     }
-    if (!resolvedTargetUID) return res.json({ success: false, message: 'Target customer UID nahi mila' });
+    if (!toUID && targetUID && String(targetUID) !== String(uid)) {
+      toUID = targetUID;
+    }
+    if (!toUID && selectedUID && String(selectedUID) !== String(uid)) {
+      toUID = selectedUID;
+    }
+    if (!toUID) return res.json({ success: false, message: 'Target customer UID nahi mila' });
 
-    const copyData = await executeStoredProcedure('SelectForCopyChatMessage', {
-      UserID: uid, SelectedUID: selectedUID, GameID: gameID, MsgDate: parsedMsgDate
-    });
+    const tol = 0.01;
+    let copyRows = [];
+    if (src_D_PComm !== undefined) {
+      copyRows = await executeQuery(
+        `SELECT * FROM Chat 
+         WHERE fGameID = @gameID 
+           AND (
+             (fSenderID = @selectedUID AND fReceiverID = @uid)
+             OR
+             (fSenderID = @uid AND fReceiverID = @selectedUID)
+           )
+           AND CAST(MsgDate AS date) = CAST(@msgDate AS date)
+           AND ABS(ISNULL(D_PComm,0) - @dPC) < ${tol} 
+           AND ABS(ISNULL(D_Amt,0) - @dA) < ${tol}
+           AND ABS(ISNULL(A_PComm,0) - @aPC) < ${tol} 
+           AND ABS(ISNULL(A_Amt,0) - @aA) < ${tol}
+           AND ABS(ISNULL(Pati_PComm,0) - @pati) < ${tol}
+           AND (IsSettled = 'False' OR IsSettled = 0)`,
+        {
+          gameID: parseInt(gameID),
+          selectedUID: parseInt(selectedUID),
+          uid: parseInt(uid),
+          msgDate: fromDateStr,
+          dPC: parseFloat(src_D_PComm) || 0,
+          dA: parseFloat(src_D_Amt) || 100,
+          aPC: parseFloat(src_A_PComm) || 0,
+          aA: parseFloat(src_A_Amt) || 10,
+          pati: parseFloat(src_Pati_PComm) || 0
+        }
+      );
+    } else {
+      copyRows = await executeQuery(
+        `SELECT * FROM Chat 
+         WHERE fGameID = @gameID 
+           AND (
+             (fSenderID = @selectedUID AND fReceiverID = @uid)
+             OR
+             (fSenderID = @uid AND fReceiverID = @selectedUID)
+           )
+           AND CAST(MsgDate AS date) = CAST(@msgDate AS date)
+           AND (IsSettled = 'False' OR IsSettled = 0)`,
+        {
+          gameID: parseInt(gameID),
+          selectedUID: parseInt(selectedUID),
+          uid: parseInt(uid),
+          msgDate: fromDateStr
+        }
+      );
+    }
 
-    if (!copyData || !copyData.length)
-      return res.json({ success: false, message: 'Data Not Found — is date/game mein koi message nahi' });
+    if (!copyRows || !copyRows.length)
+      return res.json({ success: false, message: 'Data Not Found — is date/game mein koi message nahi mila' });
 
-    const filteredData = (src_D_PComm !== undefined)
-      ? copyData.filter(row => {
-          const tol = 0.01;
-          return Math.abs((parseFloat(row.D_PComm)||0) - (parseFloat(src_D_PComm)||0)) < tol
-            && Math.abs((parseFloat(row.D_Amt)||0) - (parseFloat(src_D_Amt)||0)) < tol
-            && Math.abs((parseFloat(row.A_PComm)||0) - (parseFloat(src_A_PComm)||0)) < tol
-            && Math.abs((parseFloat(row.A_Amt)||0) - (parseFloat(src_A_Amt)||0)) < tol
-            && Math.abs((parseFloat(row.Pati_PComm)||0) - (parseFloat(src_Pati_PComm)||0)) < tol;
-        })
-      : copyData;
-
-    if (!filteredData.length)
-      return res.json({ success: false, message: 'Is rate ke liye koi message nahi mila' });
-
-    for (const row of filteredData) {
+    for (const row of copyRows) {
       await executeStoredProcedure('InsertChatMessageWhatsappLike', {
         fSenderID: uid,
-        fReceiverID: parseInt(resolvedTargetUID),
+        fReceiverID: parseInt(toUID),
         fGameID: parseInt(currentGameID),
         Message: row.Message,
         MessageDateTime: msgDateTime,
@@ -611,7 +687,7 @@ router.post('/copy-message', requireAuth, async (req, res) => {
         Pati_PComm: parseFloat(Pati_PComm) || 0,
         fHissaPartyID: parseInt(fHissaPartyID) || 0,
         HissaPerc: parseFloat(hissaPerc) || 0,
-        CurrentMsgDate: parsedCurrentDate,
+        CurrentMsgDate: toDateStr,
         ThirdPartyCommID: parseInt(ThirdPartyCommID) || 0,
         ThirdPartyDaraComm: parseFloat(ThirdPartyDaraComm) || 0,
         ThirdPartyAkharComm: parseFloat(ThirdPartyAkharComm) || 0
