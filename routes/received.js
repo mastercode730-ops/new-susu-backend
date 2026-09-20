@@ -49,13 +49,27 @@ router.get('/contacts', requireAuth, async (req, res) => {
       }
     }
 
-    const data = await executeStoredProcedure('GetMyReceivedMessageWhatsAppLike', {
-      fSenderID: parseInt(uid),
-      GID: gameId,
-      Filter: filter || '',
-      ViewAll: isViewAll,
-      Date: parsedDate
-    });
+    let data;
+    try {
+      data = await executeStoredProcedure('GetMyReceivedMessageWhatsAppLike', {
+        fSenderID: parseInt(uid),
+        GID: gameId,
+        Filter: filter || '',
+        ViewAll: isViewAll,
+        Date: parsedDate
+      });
+    } catch (spErr) {
+      if (spErr.message && spErr.message.includes('too many arguments')) {
+        data = await executeStoredProcedure('GetMyReceivedMessageWhatsAppLike', {
+          fSenderID: parseInt(uid),
+          GID: gameId,
+          Filter: filter || '',
+          ViewAll: isViewAll
+        });
+      } else {
+        throw spErr;
+      }
+    }
     res.json({ success: true, data: data || [], gameId });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
