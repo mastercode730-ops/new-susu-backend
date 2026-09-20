@@ -14,19 +14,46 @@ router.get('/games', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/received/contacts?gid=X&viewAll=bool&filter=Y
+// GET /api/received/contacts?gid=X&viewAll=bool&filter=Y&date=Z
 router.get('/contacts', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
-    const { gid, viewAll, filter } = req.query;
+    let { gid, viewAll, filter, date } = req.query;
+    let gameId = parseInt(gid) || 0;
+
+    // Fallback: If no gid provided, get first game of user
+    if (!gameId) {
+      const userGames = await executeStoredProcedure('FetchGames', { fId: uid });
+      if (userGames && userGames.length > 0) {
+        gameId = parseInt(userGames[0].GID);
+      }
+    }
+
     const isViewAll = (viewAll === 'true' || viewAll === 'True');
+
+    let parsedDate = null;
+    if (date) {
+      const iso = String(date).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      const indian = String(date).match(/^(\d{1,2})[\/-](\w{3})[\/-](\d{4})/i);
+      const dmy = String(date).match(/^(\d{1,2})[\/-](\d{2})[\/-](\d{4})/);
+      const months = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
+      if (iso) parsedDate = new Date(Date.UTC(+iso[1], +iso[2]-1, +iso[3]));
+      else if (indian) {
+        const mon = months[indian[2].toLowerCase()];
+        if (mon !== undefined) parsedDate = new Date(Date.UTC(+indian[3], mon, +indian[1]));
+      } else if (dmy) {
+        parsedDate = new Date(Date.UTC(+dmy[3], +dmy[2]-1, +dmy[1]));
+      }
+    }
+
     const data = await executeStoredProcedure('GetMyReceivedMessageWhatsAppLike', {
       fSenderID: parseInt(uid),
-      GID: parseInt(gid) || 0,
+      GID: gameId,
       Filter: filter || '',
-      ViewAll: isViewAll
+      ViewAll: isViewAll,
+      Date: parsedDate
     });
-    res.json({ success: true, data: data || [] });
+    res.json({ success: true, data: data || [], gameId });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -54,7 +81,7 @@ router.get('/customer-rates', requireAuth, async (req, res) => {
     const data = await executeQuery(
       `SELECT CR.RateID, CR.CID, CR.fUID, CR.MobileNo, CR.D_PComm, CR.D_Amt, CR.A_PComm, CR.A_Amt, CR.Patti,
               ISNULL(CAST(CAST(CR.D_PComm AS float) AS varchar)+'/'+CAST(CAST(CR.D_Amt AS float) AS varchar)+'-'+CAST(CAST(CR.A_PComm AS float) AS varchar)+'/'+CAST(CAST(CR.A_Amt AS float) AS varchar)+'-'+CAST(CAST(CR.Patti AS float) AS varchar),'0/100-0/10-0') AS Rate,
-              (SELECT UID FROM Users WHERE Mobile=CR.MobileNo) AS fUserUID,
+              COALESCE((SELECT TOP 1 UID FROM Users WHERE Mobile=CR.MobileNo), (SELECT TOP 1 UID FROM Users WHERE Mobile=REPLACE(CR.MobileNo,' ','')), C.fUID, CR.fUID) AS fUserUID,
               ISNULL(C.ThirdPartyHissaID,0) AS ThirdPartyHissaID,
               ISNULL(C.ThirdPartyHissaPer,0) AS ThirdPartyHissaPer,
               ISNULL(C.ThirdPartyCommID,0) AS ThirdPartyCommID,
