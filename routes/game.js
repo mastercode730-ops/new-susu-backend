@@ -107,13 +107,32 @@ router.get('/list', requireAuth, async (req, res) => {
   }
 });
 
+// Helper: normalize any date format to YYYY-MM-DD string
+function parseDateStr(s) {
+  if (!s) return '';
+  if (s instanceof Date) {
+    if (isNaN(s.getTime())) return '';
+    return s.toISOString().split('T')[0];
+  }
+  const str = String(s).trim();
+  const iso = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+  if (iso) return `${iso[1]}-${String(iso[2]).padStart(2, '0')}-${String(iso[3]).padStart(2, '0')}`;
+  const dmy = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (dmy) return `${dmy[3]}-${String(dmy[2]).padStart(2, '0')}-${String(dmy[1]).padStart(2, '0')}`;
+  const mo = { jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12' };
+  const m1 = str.match(/^(\d{1,2})[\/\-]([A-Za-z]{3})[\/\-](\d{4})/i);
+  if (m1 && mo[m1[2].toLowerCase()]) return `${m1[3]}-${mo[m1[2].toLowerCase()]}-${String(m1[1]).padStart(2, '0')}`;
+  return str.substring(0, 10);
+}
+
 // GET /api/game/result?gid=X&date=X
 router.get('/result', requireAuth, async (req, res) => {
   try {
     const { gid, date } = req.query;
+    const dateStr = parseDateStr(date);
     const data = await executeQuery(
-      `SELECT Result FROM Result WHERE fGameID=@gid AND Date=@date`,
-      { gid: parseInt(gid), date }
+      `SELECT Result FROM Result WHERE fGameID=@gid AND CAST(Date AS date)=CAST(@date AS date)`,
+      { gid: parseInt(gid), date: dateStr }
     );
     res.json({ success: true, data: data?.[0] || null });
   } catch (err) {
@@ -125,20 +144,38 @@ router.get('/result', requireAuth, async (req, res) => {
 router.post('/save-result', requireAuth, async (req, res) => {
   try {
     const { gameID, result, date } = req.body;
-    const uid = req.user.UID;
+    const gid = parseInt(gameID);
+    const cleanResult = String(result || '').trim();
+
+    if (!gid || !cleanResult) {
+      return res.status(400).json({ success: false, message: 'Game and result required' });
+    }
+
+    let dateStr = parseDateStr(date);
+    if (!dateStr) {
+      const utcNow = new Date();
+      const ist = new Date(utcNow.getTime() + (5.5 * 60 * 60 * 1000));
+      const dtData = await executeStoredProcedure('GetChatDate', {
+        fGameID: gid,
+        MessageDateTime: ist
+      });
+      const gDate = dtData?.[0] ? Object.values(dtData[0])[0] : null;
+      dateStr = parseDateStr(gDate) || parseDateStr(ist);
+    }
+
     const existing = await executeQuery(
-      `SELECT ResultID FROM Result WHERE fGameID=@gid AND Date=@date`,
-      { gid: parseInt(gameID), date }
+      `SELECT RID FROM Result WHERE fGameID=@gid AND CAST(Date AS date)=CAST(@date AS date)`,
+      { gid, date: dateStr }
     );
     if (existing && existing.length > 0) {
       await executeQuery(
-        `UPDATE Result SET Result=@result WHERE fGameID=@gid AND Date=@date`,
-        { result, gid: parseInt(gameID), date }
+        `UPDATE Result SET Result=@result WHERE fGameID=@gid AND CAST(Date AS date)=CAST(@date AS date)`,
+        { result: cleanResult, gid, date: dateStr }
       );
     } else {
       await executeQuery(
-        `INSERT INTO Result (fGameID, Result, Date, fUID) VALUES (@gid, @result, @date, @uid)`,
-        { gid: parseInt(gameID), result, date, uid }
+        `INSERT INTO Result (fGameID, Result, Date) VALUES (@gid, @result, @date)`,
+        { gid, result: cleanResult, date: dateStr }
       );
     }
     res.json({ success: true, message: 'Result saved' });

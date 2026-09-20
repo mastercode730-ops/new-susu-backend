@@ -173,9 +173,19 @@ router.post('/accept-reject', requireAuth, async (req, res) => {
 router.get('/result', requireAuth, async (req, res) => {
   try {
     const { gid, date } = req.query;
+    let parsedDate = date;
+    if (date) {
+      const iso = String(date).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      const indian = String(date).match(/^(\d{1,2})[\/-](\w{3})[\/-](\d{4})/i);
+      const dmy = String(date).match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
+      const months = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
+      if (iso) parsedDate = `${iso[1]}-${iso[2]}-${iso[3]}`;
+      else if (indian && months[indian[2].toLowerCase()]) parsedDate = `${indian[3]}-${String(months[indian[2].toLowerCase()]).padStart(2,'0')}-${String(indian[1]).padStart(2,'0')}`;
+      else if (dmy) parsedDate = `${dmy[3]}-${String(dmy[2]).padStart(2,'0')}-${String(dmy[1]).padStart(2,'0')}`;
+    }
     const data = await executeQuery(
-      `SELECT Result FROM Result WHERE fGameID=@gid AND Date=@date`,
-      { gid: parseInt(gid), date }
+      `SELECT Result FROM Result WHERE fGameID=@gid AND CAST(Date AS date)=CAST(@date AS date)`,
+      { gid: parseInt(gid), date: parsedDate }
     );
     res.json({ success: true, data: data?.[0] || null });
   } catch (err) {
