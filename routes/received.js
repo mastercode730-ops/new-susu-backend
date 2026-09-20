@@ -35,14 +35,17 @@ router.get('/contacts', requireAuth, async (req, res) => {
     if (date) {
       const iso = String(date).match(/^(\d{4})-(\d{2})-(\d{2})/);
       const indian = String(date).match(/^(\d{1,2})[\/-](\w{3})[\/-](\d{4})/i);
-      const dmy = String(date).match(/^(\d{1,2})[\/-](\d{2})[\/-](\d{4})/);
-      const months = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
-      if (iso) parsedDate = new Date(Date.UTC(+iso[1], +iso[2]-1, +iso[3]));
-      else if (indian) {
-        const mon = months[indian[2].toLowerCase()];
-        if (mon !== undefined) parsedDate = new Date(Date.UTC(+indian[3], mon, +indian[1]));
+      const dmy = String(date).match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
+      const months = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
+      if (iso) {
+        parsedDate = `${iso[1]}-${iso[2]}-${iso[3]}`;
+      } else if (indian && months[indian[2].toLowerCase()]) {
+        const mon = String(months[indian[2].toLowerCase()]).padStart(2, '0');
+        parsedDate = `${indian[3]}-${mon}-${String(indian[1]).padStart(2, '0')}`;
       } else if (dmy) {
-        parsedDate = new Date(Date.UTC(+dmy[3], +dmy[2]-1, +dmy[1]));
+        parsedDate = `${dmy[3]}-${String(dmy[2]).padStart(2, '0')}-${String(dmy[1]).padStart(2, '0')}`;
+      } else if (/^\d{4}-\d{2}-\d{2}$/.test(String(date).trim())) {
+        parsedDate = String(date).trim().substring(0, 10);
       }
     }
 

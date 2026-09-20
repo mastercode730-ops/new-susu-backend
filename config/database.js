@@ -21,8 +21,17 @@ let pool = null;
 
 async function getPool() {
   if (!pool) {
-    pool = await sql.connect(dbConfig);
-    console.log('✅ Mobile API: Database connected');
+    for (let i = 1; i <= 3; i++) {
+      try {
+        pool = await sql.connect(dbConfig);
+        console.log('✅ Mobile API: Database connected');
+        break;
+      } catch (err) {
+        console.error(`Database connection attempt ${i} failed:`, err.message);
+        if (i === 3) throw err;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
   }
   return pool;
 }

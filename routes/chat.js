@@ -211,6 +211,16 @@ router.post('/save-receiver-message', requireAuth, async (req, res) => {
       }
     }
 
+    // Format date if provided (YYYY-MM-DD)
+    let formattedDate = '';
+    if (date) {
+      const iso = String(date).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      const dmy = String(date).match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
+      if (iso) formattedDate = `${iso[1]}-${iso[2]}-${iso[3]}`;
+      else if (dmy) formattedDate = `${dmy[3]}-${String(dmy[2]).padStart(2, '0')}-${String(dmy[1]).padStart(2, '0')}`;
+      else formattedDate = String(date).substring(0, 10);
+    }
+
     // Insert mode
     await executeStoredProcedure('InsertChatMessageWhatsappLike', {
       fSenderID: uid,
@@ -231,6 +241,7 @@ router.post('/save-receiver-message', requireAuth, async (req, res) => {
       Pati_PComm: parseFloat(Pati_PComm) || 0,
       fHissaPartyID: fHissaPartyID || '0',
       HissaPerc: parseFloat(HissaPerc) || 0,
+      CurrentMsgDate: formattedDate,
       ThirdPartyCommID: ThirdPartyCommID || '0',
       ThirdPartyDaraComm: parseFloat(ThirdPartyDaraComm) || 0,
       ThirdPartyAkharComm: parseFloat(ThirdPartyAkharComm) || 0
