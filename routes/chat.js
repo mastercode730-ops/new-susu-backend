@@ -318,7 +318,16 @@ router.post('/accept-all', requireAuth, async (req, res) => {
 // GET /api/chat/date
 router.get('/date', requireAuth, async (req, res) => {
   try {
+    const { gameId } = req.query;
     const indianTime = getIndianTime();
+    if (gameId) {
+      const data = await executeStoredProcedure('GetChatDate', {
+        fGameID: parseInt(gameId),
+        MessageDateTime: indianTime
+      });
+      const chatDate = data?.[0] ? Object.values(data[0])[0] : indianTime;
+      return res.json({ success: true, date: chatDate });
+    }
     res.json({ success: true, date: indianTime });
   } catch (err) {
     res.json({ success: true, date: new Date() });
