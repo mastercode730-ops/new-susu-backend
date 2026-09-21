@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
 const { executeStoredProcedure, executeQuery } = require('../config/database');
+const { calculateGameResult } = require('../utils/resultCalculator');
 
 router.get('/', requireAuth, async (req, res) => {
   try {
@@ -163,21 +164,7 @@ router.post('/save-result', requireAuth, async (req, res) => {
       dateStr = parseDateStr(gDate) || parseDateStr(ist);
     }
 
-    const existing = await executeQuery(
-      `SELECT RID FROM Result WHERE fGameID=@gid AND CAST(Date AS date)=CAST(@date AS date)`,
-      { gid, date: dateStr }
-    );
-    if (existing && existing.length > 0) {
-      await executeQuery(
-        `UPDATE Result SET Result=@result WHERE fGameID=@gid AND CAST(Date AS date)=CAST(@date AS date)`,
-        { result: cleanResult, gid, date: dateStr }
-      );
-    } else {
-      await executeQuery(
-        `INSERT INTO Result (fGameID, Result, Date) VALUES (@gid, @result, @date)`,
-        { gid, result: cleanResult, date: dateStr }
-      );
-    }
+    await calculateGameResult(gid, dateStr, cleanResult, req.user.UID);
     res.json({ success: true, message: 'Result saved' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

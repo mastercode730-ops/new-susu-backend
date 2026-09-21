@@ -12,7 +12,7 @@ const dbConfig = {
     trustServerCertificate: true,
     enableArithAbort: true
   },
-  pool: { max: 30, min: 2, idleTimeoutMillis: 30000 },
+  pool: { max: 30, min: 0, idleTimeoutMillis: 30000, acquireTimeoutMillis: 60000 },
   requestTimeout: 600000,
   connectionTimeout: 30000
 };

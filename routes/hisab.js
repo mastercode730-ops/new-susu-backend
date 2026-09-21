@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
 const { executeStoredProcedure, executeQuery } = require('../config/database');
+const { calculateGameResult } = require('../utils/resultCalculator');
 
 function getIST() { return new Date(Date.now() + 5.5 * 60 * 60 * 1000); }
 
@@ -25,7 +26,9 @@ router.get('/latest-date', requireAuth, async (req, res) => {
     const uid = req.user.UID;
     const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const rows = await executeQuery(
-      `SELECT MAX(MsgDate) AS MsgDate FROM Chat WHERE fReceiverID=@uid AND IsAccepted='Accepted' AND IsTextChat='True' AND IsYantriStyle='True'`,
+      `SELECT MAX(MsgDate) AS MsgDate FROM Chat
+       WHERE fReceiverID=@uid AND IsAccepted='Accepted' AND IsTextChat='True' AND IsYantriStyle='True'
+         AND CAST(MsgDate AS date) <= CAST(DATEADD(minute, 330, GETUTCDATE()) AS date)`,
       { uid }
     );
     if (rows?.[0]?.MsgDate) {
@@ -139,6 +142,43 @@ router.get('/summary', requireAuth, async (req, res) => {
     // Support both new (startDate/endDate) and old (date) param styles
     const fromDate = startDate || date;
     const toDate = endDate || date;
+
+    // Automatically recalculate any game where results are declared but chat calculations are pending (D_Sale = 0)
+    try {
+      const sqlFrom = toSqlDate(fromDate);
+      const sqlTo = toSqlDate(toDate);
+      const pendingResults = await executeQuery(`
+        SELECT DISTINCT r.fGameID, CAST(r.Date AS date) AS rDate, r.Result
+        FROM Result r
+        WHERE CAST(r.Date AS date) >= CAST(@sqlFrom AS date)
+          AND CAST(r.Date AS date) <= CAST(@sqlTo AS date)
+          ${gid ? 'AND r.fGameID = @gid' : ''}
+          AND EXISTS (
+            SELECT 1 FROM Chat c
+            WHERE c.fGameID = r.fGameID
+              AND CAST(c.MsgDate AS date) = CAST(r.Date AS date)
+              AND c.fReceiverID = @uid
+              AND c.IsAccepted = 'Accepted'
+              AND c.IsTextChat = 'True'
+              AND c.IsYantriStyle = 'True'
+              AND c.D_Sale = 0
+              AND c.TotalAmount > 0
+          )
+      `, { sqlFrom, sqlTo, uid, gid: gid ? parseInt(gid, 10) : null });
+
+      if (pendingResults && pendingResults.length > 0) {
+        for (const pr of pendingResults) {
+          const d = new Date(pr.rDate);
+          const yyyy = d.getFullYear();
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const dd = String(d.getDate()).padStart(2, '0');
+          await calculateGameResult(pr.fGameID, `${yyyy}-${mm}-${dd}`, pr.Result, uid);
+        }
+      }
+    } catch (calcErr) {
+      console.error('Auto calculate in hisab/summary:', calcErr.message);
+    }
+
     const data = await executeStoredProcedure('GetHisabSummary', {
       date: toSqlDate(fromDate),
       date1: toSqlDate(toDate),
