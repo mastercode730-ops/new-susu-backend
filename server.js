@@ -7,6 +7,9 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust reverse proxy (Nginx) to read real client IP from X-Forwarded-For
+app.set('trust proxy', 1);
+
 app.use(cors({
   origin: true,
   credentials: true,
@@ -35,12 +38,28 @@ app.get('/', (req, res) => {
   });
 });
 
-const limiter = rateLimit({
+// Rate limiting:
+// 1. Auth limiter (up to 100 login attempts per 15 min per IP)
+const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many login attempts, please try again after a few minutes.' }
+});
+
+// 2. High-capacity API limiter for real-time polling (up to 10,000 requests per 15 min per IP)
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10000,
+  standardHeaders: true,
+  legacyHeaders: false,
   message: { success: false, message: 'Too many requests, please try again later.' }
 });
-app.use('/api/', limiter);
+
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/subuser-login', authLimiter);
+app.use('/api/', apiLimiter);
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
