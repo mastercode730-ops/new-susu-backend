@@ -194,18 +194,37 @@ router.post('/toggle-active', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/customer/rates (save/update rates)
+// POST /api/customer/rates (save/update/delete rates)
 router.post('/rates', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
     const { cid, rateID, d_PComm, d_Amt, a_PComm, a_Amt, patti, type } = req.body;
 
-    if (rateID && type === 'update') {
+    const rId = rateID ? parseInt(rateID) : 0;
+    const isDelete = (rId > 0 && (type == 2 || type === '2' || type === 'delete'));
+    const isUpdate = (rId > 0 && (type == 1 || type === '1' || type === 'update'));
+
+    if (isDelete) {
+      await executeQuery(
+        `DELETE FROM CustomersRates WHERE RateID=@rateID`,
+        { rateID: rId }
+      );
+      return res.json({ success: true, message: 'Rate deleted' });
+    }
+
+    const dPC = (d_PComm !== undefined && d_PComm !== null && !isNaN(d_PComm)) ? parseFloat(d_PComm) : 0;
+    const dA = (d_Amt !== undefined && d_Amt !== null && !isNaN(d_Amt)) ? parseFloat(d_Amt) : 100;
+    const aPC = (a_PComm !== undefined && a_PComm !== null && !isNaN(a_PComm)) ? parseFloat(a_PComm) : 0;
+    const aA = (a_Amt !== undefined && a_Amt !== null && !isNaN(a_Amt)) ? parseFloat(a_Amt) : 10;
+    const pat = (patti !== undefined && patti !== null && !isNaN(patti)) ? parseFloat(patti) : 0;
+
+    if (isUpdate) {
       await executeQuery(
         `UPDATE CustomersRates SET D_PComm=@dPC, D_Amt=@dA, A_PComm=@aPC, A_Amt=@aA, Patti=@patti
          WHERE RateID=@rateID`,
-        { rateID: parseInt(rateID), dPC: d_PComm||0, dA: d_Amt||100, aPC: a_PComm||0, aA: a_Amt||10, patti: patti||0 }
+        { rateID: rId, dPC, dA, aPC, aA, patti: pat }
       );
+      return res.json({ success: true, message: 'Rate updated' });
     } else {
       // Get Mobile for this CID
       const cRow = await executeQuery(`SELECT Mobile FROM Customers WHERE CID=@cid AND fUID=@uid`, { cid: parseInt(cid), uid });
@@ -213,10 +232,22 @@ router.post('/rates', requireAuth, async (req, res) => {
       await executeQuery(
         `INSERT INTO CustomersRates (CID, fUID, MobileNo, D_PComm, D_Amt, A_PComm, A_Amt, Patti)
          VALUES (@cid, @uid, @mobile, @dPC, @dA, @aPC, @aA, @patti)`,
-        { cid: parseInt(cid), uid, mobile: cRow[0].Mobile, dPC: d_PComm||0, dA: d_Amt||100, aPC: a_PComm||0, aA: a_Amt||10, patti: patti||0 }
+        { cid: parseInt(cid), uid, mobile: cRow[0].Mobile, dPC, dA, aPC, aA, patti: pat }
       );
+      return res.json({ success: true, message: 'Rate added' });
     }
-    res.json({ success: true, message: 'Rates saved' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// DELETE /api/customer/rates/:rateID
+router.delete('/rates/:rateID', requireAuth, async (req, res) => {
+  try {
+    const rateID = parseInt(req.params.rateID);
+    if (!rateID) return res.status(400).json({ success: false, message: 'RateID required' });
+    await executeQuery(`DELETE FROM CustomersRates WHERE RateID=@rateID`, { rateID });
+    res.json({ success: true, message: 'Rate deleted' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
