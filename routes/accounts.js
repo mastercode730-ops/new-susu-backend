@@ -72,11 +72,18 @@ router.post('/', requireAuth, async (req, res) => {
     const customerUID = req.body.customerUID || req.body.cusID;
     const { date, type, amount, narration, staffID } = req.body;
     if (!amount || !type) return res.status(400).json({ success: false, message: 'Amount and Type required' });
+    const typeMap = {
+      'Payment/Diye': 'Paid',
+      'Receipt/Liye': 'Received',
+      'AdjustReceipt(-)': 'Receive Adjustment',
+      'AdjustPayment(+)': 'Paid Adjustment'
+    };
+    const finalType = typeMap[type] || type;
     await executeStoredProcedure('CreateTransaction', {
       fCusID: customerUID === 'Self' ? 0 : customerUID,
-      date: date, Type: type, Amount: amount,
+      date: date, Type: finalType, Amount: amount,
       CreatedBy: uid, Narration: narration || '',
-      fStaff: (type === 'Paid' || type === 'Received') && staffID ? staffID : 0
+      fStaff: (finalType === 'Paid' || finalType === 'Received') && staffID ? staffID : 0
     });
     res.json({ success: true, message: 'Transaction created' });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
