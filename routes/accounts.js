@@ -44,10 +44,18 @@ router.get('/subusers', requireAuth, async (req, res) => {
 router.get('/list', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
-    const { fromDate, toDate, staffUID, custUID } = req.query;
-    const params = { fUID: uid, FDate: fromDate || '', TDate: toDate || '' };
-    if (staffUID && staffUID !== '0' && staffUID !== 'All') params.fStaff = staffUID;
-    if (custUID && custUID !== '0' && custUID !== 'All') params.fCID = custUID;
+    const fromDate = req.query.fromDate || req.query.fDate || '';
+    const toDate = req.query.toDate || req.query.tDate || '';
+    const rawStaff = req.query.staffUID !== undefined ? req.query.staffUID : req.query.staffID;
+    const rawCust = req.query.custUID !== undefined ? req.query.custUID : req.query.customerUID;
+
+    const params = { fUID: uid, FDate: fromDate, TDate: toDate };
+    if (rawStaff !== undefined && rawStaff !== '' && rawStaff !== 'All' && rawStaff !== 'all') {
+      params.fStaff = (rawStaff === 'Self' || rawStaff === '0') ? 0 : rawStaff;
+    }
+    if (rawCust !== undefined && rawCust !== '' && rawCust !== 'All' && rawCust !== 'all') {
+      params.fCID = (rawCust === 'Self' || rawCust === '0') ? 0 : rawCust;
+    }
     const data = await executeStoredProcedure('ShowAllTransaction', params);
     res.json({ success: true, data: data || [] });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }

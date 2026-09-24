@@ -124,15 +124,49 @@ router.get('/my-balance-history', requireAuth, async (req, res) => {
   try {
     const { customerUID, type, fromDate, toDate } = req.query;
     const uid = req.user.UID;
-    let spName = 'GetMYBalanceHistory';
-    if (type === 'sale' || type === 'Sale') spName = 'GetMYBalanceHistorySale';
-    if (type === 'accounts' || type === 'Accounts') spName = 'GetMYBalanceHistoryAccounts';
-    const data = await executeStoredProcedure(spName, {
+    const data = await executeStoredProcedure('GetMYBalanceHistory', {
       fUID: uid, UID: customerUID,
       FromDate: toSqlDate(fromDate || '01/Jan/2022'),
       ToDate: toSqlDate(toDate)
     });
-    res.json({ success: true, data: data || [] });
+    let rows = data || [];
+    const tLower = (type || '').toLowerCase();
+    if (tLower === 'sale') {
+      rows = rows.filter(r => {
+        const t = (r.Type || '').toLowerCase();
+        return ['sale', 'self hissa', 'self comm'].includes(t) || t.includes('adjust');
+      });
+      let running = 0;
+      rows = rows.map((r, idx) => {
+        const win = parseFloat(r.WinAmount || 0);
+        running += win;
+        return {
+          ...r,
+          SrNo: idx + 1,
+          RunningTotal: running,
+          Dene: win < 0 ? Math.abs(win) : 0,
+          Lene: win > 0 ? win : 0
+        };
+      });
+    } else if (tLower === 'accounts' || tLower === 'account') {
+      rows = rows.filter(r => {
+        const t = (r.Type || '').toLowerCase();
+        return !['sale', 'self hissa', 'self comm', 'opening'].includes(t) && !t.includes('adjust');
+      });
+      let running = 0;
+      rows = rows.map((r, idx) => {
+        const win = parseFloat(r.WinAmount || 0);
+        running += win;
+        return {
+          ...r,
+          SrNo: idx + 1,
+          RunningTotal: running,
+          Dene: win < 0 ? Math.abs(win) : 0,
+          Lene: win > 0 ? win : 0
+        };
+      });
+    }
+    res.json({ success: true, data: rows });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -143,15 +177,49 @@ router.get('/game-balance-history', requireAuth, async (req, res) => {
   try {
     const { customerUID, type, fromDate, toDate } = req.query;
     const uid = req.user.UID;
-    let spName = 'GetMyGameBalanceHistory';
-    if (type === 'sale' || type === 'Sale') spName = 'GetMyGameBalanceHistorySale';
-    if (type === 'accounts' || type === 'Accounts') spName = 'GetMyGameBalanceHistoryAccounts';
-    const data = await executeStoredProcedure(spName, {
+    const data = await executeStoredProcedure('GetMyGameBalanceHistory', {
       fUID: uid, UID: customerUID,
       FromDate: toSqlDate(fromDate || '01/Jan/2022'),
       ToDate: toSqlDate(toDate)
     });
-    res.json({ success: true, data: data || [] });
+    let rows = data || [];
+    const tLower = (type || '').toLowerCase();
+    if (tLower === 'sale') {
+      rows = rows.filter(r => {
+        const t = (r.Type || '').toLowerCase();
+        return ['sale', 'self hissa', 'self comm'].includes(t) || t.includes('adjust');
+      });
+      let running = 0;
+      rows = rows.map((r, idx) => {
+        const win = parseFloat(r.WinAmount || 0);
+        running += win;
+        return {
+          ...r,
+          SrNo: idx + 1,
+          RunningTotal: running,
+          Dene: win < 0 ? Math.abs(win) : 0,
+          Lene: win > 0 ? win : 0
+        };
+      });
+    } else if (tLower === 'accounts' || tLower === 'account') {
+      rows = rows.filter(r => {
+        const t = (r.Type || '').toLowerCase();
+        return !['sale', 'self hissa', 'self comm', 'opening'].includes(t) && !t.includes('adjust');
+      });
+      let running = 0;
+      rows = rows.map((r, idx) => {
+        const win = parseFloat(r.WinAmount || 0);
+        running += win;
+        return {
+          ...r,
+          SrNo: idx + 1,
+          RunningTotal: running,
+          Dene: win < 0 ? Math.abs(win) : 0,
+          Lene: win > 0 ? win : 0
+        };
+      });
+    }
+    res.json({ success: true, data: rows });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
