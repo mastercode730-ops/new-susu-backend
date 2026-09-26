@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
 const { executeStoredProcedure, executeQuery } = require('../config/database');
+const { getAssignedClients } = require('../utils/assignedClients');
 
 // GET /api/accounts/latest-date
 router.get('/latest-date', requireAuth, async (req, res) => {
@@ -16,14 +17,24 @@ router.get('/latest-date', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// GET /api/accounts/customers (subusers see the same full list as admin)
+// GET /api/accounts/customers
 router.get('/customers', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
-    const qry = `SELECT Customers.CustomerName + ' ' + RIGHT(Customers.Mobile, 5) AS Name, Users.UID
+    const subUID = req.user.SubUID || null;
+    let qry = `SELECT Customers.CustomerName + ' ' + RIGHT(Customers.Mobile, 5) AS Name, Users.UID
              FROM Customers INNER JOIN Users ON Customers.Mobile = Users.Mobile
              WHERE Customers.fUID = @uid`;
-    const data = await executeQuery(qry, { uid });
+    if (subUID) {
+      qry = `SELECT Customers.CustomerName + ' ' + RIGHT(Customers.Mobile, 5) AS Name, Users.UID
+             FROM Customers
+             INNER JOIN Users ON Customers.Mobile = Users.Mobile
+             INNER JOIN AssignClientToStaff ON Customers.CID = AssignClientToStaff.fCustID
+               AND AssignClientToStaff.fStaffID = @subUID
+               AND (AssignClientToStaff.IsAssigned = 'True' OR AssignClientToStaff.IsAssigned = 1)
+             WHERE Customers.fUID = @uid`;
+    }
+    const data = await executeQuery(qry, { uid, subUID });
     res.json({ success: true, data: data || [] });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -56,7 +67,11 @@ router.get('/list', requireAuth, async (req, res) => {
     if (rawCust !== undefined && rawCust !== '' && rawCust !== 'All' && rawCust !== 'all') {
       params.fCID = (rawCust === 'Self' || rawCust === '0') ? 0 : rawCust;
     }
-    const data = await executeStoredProcedure('ShowAllTransaction', params);
+    let data = await executeStoredProcedure('ShowAllTransaction', params);
+    const assigned = await getAssignedClients(uid, req.user.SubUID);
+    if (assigned && data) {
+      data = data.filter(r => assigned.isMatch(r) || String(r.fCustID) === String(uid));
+    }
     res.json({ success: true, data: data || [] });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });

@@ -10,6 +10,8 @@ function generateToken(payload) {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
 }
 
+const isBitTrue = v => v === true || v === 'True' || v === 1 || String(v) === '1' || String(v).toLowerCase() === 'true';
+
 async function bindAccessRight(staffID) {
   if (!staffID) return getDefaultAccess();
   try {
@@ -17,13 +19,20 @@ async function bindAccessRight(staffID) {
       `SELECT * FROM AccessRight WHERE ARfSatffID = @staffID`,
       { staffID }
     );
-    if (data && data.length === 1) {
+    if (data && data.length >= 1) {
       const ar = data[0];
       return {
-        ADDContacts: ar.ADDContacts, ADDGames: ar.ADDGames, Result: ar.Result,
-        Hisab: ar.Hisab, HisabSummary: ar.HisabSummary, DateWiseHisab: ar.DateWiseHisab,
-        Accounts: ar.Accounts, ShowAllAccounts: ar.ShowAllAccounts, Balance: ar.Balance,
-        LC: ar.LC, Yantri: ar.Yantri
+        ADDContacts: isBitTrue(ar.ADDContacts),
+        ADDGames: isBitTrue(ar.ADDGames),
+        Result: isBitTrue(ar.Result),
+        Hisab: isBitTrue(ar.Hisab),
+        HisabSummary: isBitTrue(ar.HisabSummary),
+        DateWiseHisab: isBitTrue(ar.DateWiseHisab),
+        Accounts: isBitTrue(ar.Accounts),
+        ShowAllAccounts: isBitTrue(ar.ShowAllAccounts),
+        Balance: isBitTrue(ar.Balance),
+        LC: isBitTrue(ar.LC),
+        Yantri: isBitTrue(ar.Yantri)
       };
     }
     return getDefaultAccess();
@@ -32,10 +41,10 @@ async function bindAccessRight(staffID) {
 
 function getDefaultAccess() {
   return {
-    ADDContacts: 'False', ADDGames: 'False', Result: 'False',
-    Hisab: 'False', HisabSummary: 'False', DateWiseHisab: 'False',
-    Accounts: 'False', ShowAllAccounts: 'False', Balance: 'False',
-    LC: 'False', Yantri: 'False'
+    ADDContacts: false, ADDGames: false, Result: false,
+    Hisab: false, HisabSummary: false, DateWiseHisab: false,
+    Accounts: false, ShowAllAccounts: false, Balance: false,
+    LC: false, Yantri: false
   };
 }
 
@@ -123,8 +132,17 @@ router.post('/subuser-login', async (req, res) => {
 });
 
 // GET /api/auth/me
-router.get('/me', requireAuth, (req, res) => {
-  res.json({ success: true, user: req.user });
+router.get('/me', requireAuth, async (req, res) => {
+  try {
+    const user = { ...req.user };
+    if (user.SubUID) {
+      const access = await bindAccessRight(user.SubUID);
+      Object.assign(user, access);
+    }
+    res.json({ success: true, user });
+  } catch (e) {
+    res.json({ success: true, user: req.user });
+  }
 });
 
 // GET /api/auth/today

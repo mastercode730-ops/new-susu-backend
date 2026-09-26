@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
 const { executeStoredProcedure, executeQuery } = require('../config/database');
+const { getAssignedClients } = require('../utils/assignedClients');
 
 function getIST() { return new Date(Date.now() + 5.5 * 60 * 60 * 1000); }
 
@@ -45,11 +46,16 @@ router.get('/latest-date', requireAuth, async (req, res) => {
 router.get('/customers', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
-    const data = await executeQuery(
-      `SELECT CustomerName, Mobile, (SELECT UID FROM Users WHERE Mobile=Customers.Mobile) AS UID
-       FROM Customers WHERE fUID=@uid`,
-      { uid }
-    );
+    const subUID = req.user.SubUID || null;
+    let qry = `SELECT CustomerName, Mobile, (SELECT UID FROM Users WHERE Mobile=Customers.Mobile) AS UID
+       FROM Customers WHERE fUID=@uid`;
+    if (subUID) {
+      qry = `SELECT c.CustomerName, c.Mobile, (SELECT UID FROM Users WHERE Mobile=c.Mobile) AS UID
+       FROM Customers c
+       INNER JOIN AssignClientToStaff a ON c.CID = a.fCustID AND a.fStaffID = @subUID AND (a.IsAssigned = 'True' OR a.IsAssigned = 1)
+       WHERE c.fUID = @uid`;
+    }
+    const data = await executeQuery(qry, { uid, subUID });
     res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -61,9 +67,13 @@ router.get('/game-hisab', requireAuth, async (req, res) => {
   try {
     const { date, filter } = req.query;
     const uid = req.user.UID;
-    const data = await executeStoredProcedure('GetDateWiseMyHisab', {
+    const assigned = await getAssignedClients(uid, req.user.SubUID);
+    let data = await executeStoredProcedure('GetDateWiseMyHisab', {
       fUID: uid, Date: toSqlDate(date), Filter: filter || ''
     });
+    if (assigned && data) {
+      data = data.filter(r => assigned.isMatch(r));
+    }
     res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -75,9 +85,13 @@ router.get('/win-amount', requireAuth, async (req, res) => {
   try {
     const { date, filter } = req.query;
     const uid = req.user.UID;
-    const data = await executeStoredProcedure('GetDateWiseWinAmount', {
+    const assigned = await getAssignedClients(uid, req.user.SubUID);
+    let data = await executeStoredProcedure('GetDateWiseWinAmount', {
       fUID: uid, Date: toSqlDate(date), Filter: filter || ''
     });
+    if (assigned && data) {
+      data = data.filter(r => assigned.isMatch(r));
+    }
     res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -90,6 +104,10 @@ router.get('/game-hisab-history', requireAuth, async (req, res) => {
     const { date, uid: custUID, customerUID, fromDate, toDate } = req.query;
     const myUID = req.user.UID;
     const targetUID = custUID || customerUID;
+    const assigned = await getAssignedClients(myUID, req.user.SubUID);
+    if (assigned && targetUID && !assigned.uids.has(String(targetUID))) {
+      return res.json({ success: true, data: [] });
+    }
     const data = await executeStoredProcedure('GetDateWiseMyHisabHistory', {
       fUID: myUID,
       Date: toSqlDate(date || fromDate),
@@ -107,6 +125,10 @@ router.get('/win-amount-history', requireAuth, async (req, res) => {
     const { date, uid: custUID, customerUID, fromDate, toDate } = req.query;
     const myUID = req.user.UID;
     const targetUID = custUID || customerUID;
+    const assigned = await getAssignedClients(myUID, req.user.SubUID);
+    if (assigned && targetUID && !assigned.uids.has(String(targetUID))) {
+      return res.json({ success: true, data: [] });
+    }
     const data = await executeStoredProcedure('GetDateWiseWinAmountHistory', {
       fUID: myUID,
       date: toSqlDate(date || fromDate),
@@ -124,9 +146,13 @@ router.get('/sale-history', requireAuth, async (req, res) => {
     const { date, filter } = req.query;
     const uid = req.user.UID;
     if (!date) return res.json({ success: true, data: [] });
-    const data = await executeStoredProcedure('ShowSaleHistory', {
+    const assigned = await getAssignedClients(uid, req.user.SubUID);
+    let data = await executeStoredProcedure('ShowSaleHistory', {
       fUID: uid, Date: toSqlDate(date), Filter: filter || ''
     });
+    if (assigned && data) {
+      data = data.filter(r => assigned.isMatch(r));
+    }
     res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -138,17 +164,24 @@ router.get('/summary', requireAuth, async (req, res) => {
   try {
     const { startDate, endDate, gid, cid, date } = req.query;
     const uid = req.user.UID;
+    const assigned = await getAssignedClients(uid, req.user.SubUID);
+    if (assigned && cid && !assigned.uids.has(String(cid))) {
+      return res.json({ success: true, data: [] });
+    }
     // Support both new (startDate/endDate) and old (date) param styles
     const fromDate = startDate || date;
     const toDate = endDate || date;
 
-    const data = await executeStoredProcedure('GetHisabSummary', {
+    let data = await executeStoredProcedure('GetHisabSummary', {
       date: toSqlDate(fromDate),
       date1: toSqlDate(toDate),
       UID: uid,
       GID: gid || null,
       CID: cid || null
     });
+    if (assigned && data) {
+      data = data.filter(r => assigned.isMatch(r));
+    }
     res.json({ success: true, data: data || [] });
   } catch (err) {
     console.error('hisab/summary:', err.message);
@@ -161,9 +194,13 @@ router.get('/date-wise-summary', requireAuth, async (req, res) => {
   try {
     const { fromDate, toDate } = req.query;
     const uid = req.user.UID;
-    const data = await executeStoredProcedure('ShowDateWiseHisabSummary', {
+    const assigned = await getAssignedClients(uid, req.user.SubUID);
+    let data = await executeStoredProcedure('ShowDateWiseHisabSummary', {
       UID: uid, FromDate: toSqlDate(fromDate), ToDate: toSqlDate(toDate || fromDate)
     });
+    if (assigned && data) {
+      data = data.filter(r => assigned.isMatch(r));
+    }
     res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -175,6 +212,10 @@ router.get('/date-wise-user', requireAuth, async (req, res) => {
   try {
     const { uid: custUID, fromDate, toDate } = req.query;
     const myUID = req.user.UID;
+    const assigned = await getAssignedClients(myUID, req.user.SubUID);
+    if (assigned && custUID && !assigned.uids.has(String(custUID)) && !assigned.cids.has(String(custUID))) {
+      return res.json({ success: true, data: [] });
+    }
     const data = await executeStoredProcedure('ShowDateWiseHisabSummaryUserID', {
       CID: custUID, UID: myUID,
       FromDate: toSqlDate(fromDate), ToDate: toSqlDate(toDate || fromDate)

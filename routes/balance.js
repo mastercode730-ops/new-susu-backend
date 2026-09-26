@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
 const { executeStoredProcedure, executeQuery } = require('../config/database');
+const { getAssignedClients } = require('../utils/assignedClients');
 
 function getIST() { return new Date(Date.now() + 5.5 * 60 * 60 * 1000); }
 
@@ -54,9 +55,13 @@ router.get('/my-balance', requireAuth, async (req, res) => {
     const uid = req.user.UID;
     const mobile = req.user.Mobile || '';
     const { date } = req.query;
-    const data = await executeStoredProcedure('GetMYBalance', {
+    const assigned = await getAssignedClients(uid, req.user.SubUID);
+    let data = await executeStoredProcedure('GetMYBalance', {
       fUID: uid, Date: toSqlDate(date), Filter: '', Mobile: mobile
     });
+    if (assigned && data) {
+      data = data.filter(r => assigned.isMatch(r));
+    }
     res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -68,10 +73,14 @@ router.get('/game-balance', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
     const { date } = req.query;
+    const assigned = await getAssignedClients(uid, req.user.SubUID);
     let data = await executeStoredProcedure('GetMyGameBalance', {
       fUID: uid, Date: toSqlDate(date), Filter: ''
     });
     data = data || [];
+    if (assigned) {
+      data = data.filter(r => assigned.isMatch(r));
+    }
     res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -83,10 +92,14 @@ router.get('/uttar-balance', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
     const { date } = req.query;
+    const assigned = await getAssignedClients(uid, req.user.SubUID);
     let data = await executeStoredProcedure('GetMyGameBalance', {
       fUID: uid, Date: toSqlDate(date), Filter: '', IsUttar: true
     });
     data = data || [];
+    if (assigned) {
+      data = data.filter(r => assigned.isMatch(r));
+    }
     res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -129,6 +142,10 @@ router.get('/my-balance-history', requireAuth, async (req, res) => {
   try {
     const { customerUID, type, fromDate, toDate } = req.query;
     const uid = req.user.UID;
+    const assigned = await getAssignedClients(uid, req.user.SubUID);
+    if (assigned && customerUID && !assigned.uids.has(String(customerUID))) {
+      return res.json({ success: true, data: [] });
+    }
     const data = await executeStoredProcedure('GetMYBalanceHistory', {
       fUID: uid, UID: customerUID,
       FromDate: toSqlDate(fromDate || '01/Jan/2022'),
@@ -182,6 +199,10 @@ router.get('/game-balance-history', requireAuth, async (req, res) => {
   try {
     const { customerUID, type, fromDate, toDate } = req.query;
     const uid = req.user.UID;
+    const assigned = await getAssignedClients(uid, req.user.SubUID);
+    if (assigned && customerUID && !assigned.uids.has(String(customerUID))) {
+      return res.json({ success: true, data: [] });
+    }
     const data = await executeStoredProcedure('GetMyGameBalanceHistory', {
       fUID: uid, UID: customerUID,
       FromDate: toSqlDate(fromDate || '01/Jan/2022'),

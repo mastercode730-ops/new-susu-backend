@@ -103,8 +103,14 @@ router.post('/subusers', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
     const { name, mobile, password, isActive } = req.body;
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ success: false, message: 'Name is required' });
+    }
+    if (!mobile || !String(mobile).trim()) {
+      return res.status(400).json({ success: false, message: 'Mobile number is required' });
+    }
     await executeStoredProcedure('AddSubusers', {
-      Name: name, Mobile: mobile, password, IsActive: isActive !== false, createdid: uid
+      Name: String(name).trim(), Mobile: String(mobile).trim(), password: password || '', IsActive: isActive !== false, createdid: uid
     });
     res.json({ success: true });
   } catch (err) {
@@ -117,8 +123,14 @@ router.put('/subusers/:id', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
     const { name, mobile, password, isActive } = req.body;
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ success: false, message: 'Name is required' });
+    }
+    if (!mobile || !String(mobile).trim()) {
+      return res.status(400).json({ success: false, message: 'Mobile number is required' });
+    }
     await executeStoredProcedure('UpdateSubusers', {
-      subid: req.params.id, Name: name, Mobile: mobile, password, IsActive: isActive !== false, createdid: uid
+      subid: req.params.id, Name: String(name).trim(), Mobile: String(mobile).trim(), password: password || '', IsActive: isActive !== false, createdid: uid
     });
     res.json({ success: true });
   } catch (err) {
@@ -143,6 +155,17 @@ router.get('/access-rights', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/admin/access-rights/:id
+router.get('/access-rights/:id', requireAuth, async (req, res) => {
+  try {
+    const subUID = req.params.id;
+    const data = await executeQuery(`SELECT * FROM AccessRight WHERE ARfSatffID=@subUID`, { subUID });
+    res.json({ success: true, data: data && data[0] ? data[0] : null });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // POST /api/admin/access-rights
 router.post('/access-rights', requireAuth, async (req, res) => {
   try {
@@ -150,9 +173,9 @@ router.post('/access-rights', requireAuth, async (req, res) => {
             dateWiseHisab, accounts, showAllAccounts, balance, lc, yantri } = req.body;
     await executeStoredProcedure('InsertUpdateAccessRight', {
       fUID: req.user.UID, ARfSatffID: subUserID,
-      ADDContacts: addContacts, ADDGames: addGames, Result: result, Hisab: hisab,
-      HisabSummary: hisabSummary, DateWiseHisab: dateWiseHisab, Accounts: accounts,
-      ShowAllAccounts: showAllAccounts, Balance: balance, LC: lc, Yantri: yantri
+      ADDContacts: !!addContacts, ADDGames: !!addGames, Result: !!result, Hisab: !!hisab,
+      HisabSummary: !!hisabSummary, DateWiseHisab: !!dateWiseHisab, Accounts: !!accounts,
+      ShowAllAccounts: !!showAllAccounts, Balance: !!balance, LC: !!lc, Yantri: !!yantri
     });
     res.json({ success: true, message: 'Access rights saved' });
   } catch (err) {
