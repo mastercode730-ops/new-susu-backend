@@ -12,7 +12,8 @@ function toSqlDate(dateStr) {
     return String(ist.getUTCDate()).padStart(2,'0') + '/' + MONTHS[ist.getUTCMonth()] + '/' + ist.getUTCFullYear();
   }
   const s = String(dateStr).trim();
-  if (/^\d{2}\/[A-Za-z]{3}\/\d{4}$/.test(s)) return s;
+  const ddmmyyyy = s.match(/^(\d{1,2})\/([A-Za-z]{3})\/(\d{4})$/);
+  if (ddmmyyyy) return ddmmyyyy[1].padStart(2, '0') + '/' + ddmmyyyy[2] + '/' + ddmmyyyy[3];
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (iso) return iso[3] + '/' + MONTHS[parseInt(iso[2])-1] + '/' + iso[1];
   const ist = getIST();
@@ -25,7 +26,11 @@ router.get('/latest-date', requireAuth, async (req, res) => {
     const uid = req.user.UID;
     const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const rows = await executeQuery(
-      `SELECT MAX(MsgDate) AS MsgDate FROM Chat WHERE fReceiverID=@uid AND IsAccepted='Accepted' AND IsTextChat='True' AND IsYantriStyle='True'`,
+      `SELECT MAX(d) AS MsgDate FROM (
+         SELECT MAX(MsgDate) AS d FROM Chat WHERE fReceiverID=@uid AND IsAccepted='Accepted' AND IsTextChat='True' AND IsYantriStyle='True'
+         UNION ALL
+         SELECT MAX(Date) AS d FROM Accounts WHERE CreatedBy=@uid
+       ) AS T`,
       { uid }
     );
     if (rows?.[0]?.MsgDate) {
