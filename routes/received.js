@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
 const { executeStoredProcedure, executeQuery } = require('../config/database');
+const { getAssignedClients } = require('../utils/assignedClients');
 
 // GET /api/received/games — FetchGames (same as home/games)
 router.get('/games', requireAuth, async (req, res) => {
@@ -81,10 +82,15 @@ router.get('/receiver-list', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
     const filter = req.query.filter || '';
-    const data = await executeStoredProcedure('FetchReceiverList', {
+    const assigned = await getAssignedClients(uid, req.user.SubUID);
+    let data = await executeStoredProcedure('FetchReceiverList', {
       fUID: String(uid), Filter: filter
     });
-    res.json({ success: true, data: data || [] });
+    data = data || [];
+    if (assigned) {
+      data = data.filter(r => assigned.isMatch(r));
+    }
+    res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
