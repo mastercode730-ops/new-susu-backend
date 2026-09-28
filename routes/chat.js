@@ -177,6 +177,13 @@ router.post('/save-receiver-message', requireAuth, async (req, res) => {
 
     // Update mode
     if (btnText === 'Update(Insert)' && chatId) {
+      const chk = await executeQuery(
+        `SELECT IsAccepted FROM Chat WHERE ChatID = @chatId`,
+        { chatId: parseInt(chatId) }
+      );
+      if (chk && chk[0] && ['Rejected', 'Cancelled', 'Cancel'].includes(chk[0].IsAccepted)) {
+        return res.json({ success: false, message: 'Cannot edit cancelled entry' });
+      }
       await executeStoredProcedure('UpdateChatmsg', {
         ChatID: chatId,
         fSenderID: uid,
@@ -258,6 +265,13 @@ router.post('/save-receiver-message', requireAuth, async (req, res) => {
 router.put('/update', requireAuth, async (req, res) => {
   try {
     const { chatID, chat, gameID, totalAmount, dPComm, dAmt, aPComm, aAmt, pati, isYantriStyle } = req.body;
+    const chk = await executeQuery(
+      `SELECT IsAccepted FROM Chat WHERE ChatID = @chatID`,
+      { chatID: parseInt(chatID) }
+    );
+    if (chk && chk[0] && ['Rejected', 'Cancelled', 'Cancel'].includes(chk[0].IsAccepted)) {
+      return res.status(400).json({ success: false, message: 'Cannot update cancelled entry' });
+    }
     const indianTime = getIndianTime();
     const msgDateTime = formatDateTime(indianTime);
     const uid = req.user.UID;
@@ -302,6 +316,13 @@ router.delete('/:chatId', requireAuth, async (req, res) => {
 router.post('/accept-reject', requireAuth, async (req, res) => {
   try {
     const { chatId, status } = req.body;
+    const chk = await executeQuery(
+      `SELECT IsAccepted FROM Chat WHERE ChatID = @chatId`,
+      { chatId: parseInt(chatId) }
+    );
+    if (chk && chk[0] && ['Rejected', 'Cancelled', 'Cancel'].includes(chk[0].IsAccepted)) {
+      return res.json({ success: false, message: 'Entry is already cancelled' });
+    }
     await executeQuery(
       `UPDATE Chat SET IsAccepted=@status WHERE ChatID=@chatId`,
       { chatId: parseInt(chatId), status }
@@ -355,6 +376,13 @@ router.post('/forward-accept', requireAuth, async (req, res) => {
     const uid = req.user.UID;
     const uniqueIds = [...new Set(chatIDs)];
     for (const chatID of uniqueIds) {
+      const chk = await executeQuery(
+        `SELECT IsAccepted FROM Chat WHERE ChatID = @chatID`,
+        { chatID: parseInt(chatID) }
+      );
+      if (chk && chk[0] && ['Rejected', 'Cancelled', 'Cancel'].includes(chk[0].IsAccepted)) {
+        continue;
+      }
       await executeStoredProcedure('ReceiveChatSendMessage', {
         fSenderID: uid,
         fGameID: gameID,
@@ -513,10 +541,12 @@ router.post('/move-message', requireAuth, async (req, res) => {
            )
            AND CAST(MsgDate AS date) = CAST(@msgDate AS date)
            AND ABS(ISNULL(D_PComm,0) - @dPC) < ${tol} 
-           AND ABS(ISNULL(D_Amt,0) - @dA) < ${tol}
+           AND ABS(ISNULL(D_Amt,0) - @dA) < ${tol} 
            AND ABS(ISNULL(A_PComm,0) - @aPC) < ${tol} 
-           AND ABS(ISNULL(A_Amt,0) - @aA) < ${tol}
-           AND ABS(ISNULL(Pati_PComm,0) - @pati) < ${tol}`,
+           AND ABS(ISNULL(A_Amt,0) - @aA) < ${tol} 
+           AND ABS(ISNULL(Pati_PComm,0) - @pati) < ${tol}
+           AND (IsSettled = 'False' OR IsSettled = 0)
+           AND ISNULL(IsAccepted, '') NOT IN ('Rejected', 'Cancelled', 'Cancel')`,
         {
           gameID: parseInt(gameID),
           selectedUID: parseInt(selectedUID),
@@ -530,7 +560,7 @@ router.post('/move-message', requireAuth, async (req, res) => {
         }
       );
       if (!srcRows || !srcRows.length)
-        return res.json({ success: false, message: 'Is rate ke liye koi message nahi mila' });
+        return res.json({ success: false, message: 'Is rate ke liye koi valid message nahi mila (ya sabhi cancelled hain)' });
 
       for (const row of srcRows) {
         await executeQuery(
@@ -564,15 +594,47 @@ router.post('/move-message', requireAuth, async (req, res) => {
         );
       }
     } else {
-      await executeStoredProcedure('UpdateMoveChatMessage', {
-        UserID: uid, SelectedUID: selectedUID, Mobile: String(mobile),
-        SubUID: subUID || '', GameID: gameID, CurrentGameID: currentGameID,
-        fHissaPartyID: fHissaPartyID || 0, HissaPerc: parseFloat(hissaPerc) || 0,
-        D_PComm: parseFloat(D_PComm) || 0, D_Amt: parseFloat(D_Amt) || 100,
-        A_PComm: parseFloat(A_PComm) || 0, A_Amt: parseFloat(A_Amt) || 10,
-        Pati_PComm: parseFloat(Pati_PComm) || 0,
-        MsgDate: fromDateStr, CurrentMsgDate: toDateStr, MsgdateTime: msgDateTime
-      });
+      await executeQuery(
+        `UPDATE Chat 
+         SET fSenderID = @toUID,
+             fReceiverID = @uid,
+             fGameID = @newGame,
+             MsgDate = @newDate,
+             MessageDateTime = @dt,
+             D_PComm = @dPC, D_Amt = @dA,
+             A_PComm = @aPC, A_Amt = @aA,
+             Pati_PComm = @pati,
+             fHissaPartyID = @hissaID,
+             HissaPerc = @hissaPer,
+             subuserID = CASE WHEN @subUID != '' THEN @subUID ELSE subuserID END
+         WHERE fGameID = @gameID
+           AND (
+             (fSenderID = @selectedUID AND fReceiverID = @uid)
+             OR
+             (fSenderID = @uid AND fReceiverID = @selectedUID)
+           )
+           AND CAST(MsgDate AS date) = CAST(@msgDate AS date)
+           AND (IsSettled = 'False' OR IsSettled = 0)
+           AND ISNULL(IsAccepted, '') NOT IN ('Rejected', 'Cancelled', 'Cancel')`,
+        {
+          toUID: parseInt(toUID),
+          uid: parseInt(uid),
+          newGame: parseInt(currentGameID),
+          newDate: toDateStr,
+          dt: msgDateTime,
+          dPC: parseFloat(D_PComm) || 0,
+          dA: parseFloat(D_Amt) || 100,
+          aPC: parseFloat(A_PComm) || 0,
+          aA: parseFloat(A_Amt) || 10,
+          pati: parseFloat(Pati_PComm) || 0,
+          hissaID: parseInt(fHissaPartyID) || 0,
+          hissaPer: parseFloat(hissaPerc) || 0,
+          subUID: subUID || '',
+          gameID: parseInt(gameID),
+          selectedUID: parseInt(selectedUID),
+          msgDate: fromDateStr
+        }
+      );
     }
     res.json({ success: true, message: 'Data Move Successfully' });
   } catch (err) {
@@ -627,11 +689,12 @@ router.post('/copy-message', requireAuth, async (req, res) => {
            )
            AND CAST(MsgDate AS date) = CAST(@msgDate AS date)
            AND ABS(ISNULL(D_PComm,0) - @dPC) < ${tol} 
-           AND ABS(ISNULL(D_Amt,0) - @dA) < ${tol}
+           AND ABS(ISNULL(D_Amt,0) - @dA) < ${tol} 
            AND ABS(ISNULL(A_PComm,0) - @aPC) < ${tol} 
-           AND ABS(ISNULL(A_Amt,0) - @aA) < ${tol}
+           AND ABS(ISNULL(A_Amt,0) - @aA) < ${tol} 
            AND ABS(ISNULL(Pati_PComm,0) - @pati) < ${tol}
-           AND (IsSettled = 'False' OR IsSettled = 0)`,
+           AND (IsSettled = 'False' OR IsSettled = 0)
+           AND ISNULL(IsAccepted, '') NOT IN ('Rejected', 'Cancelled', 'Cancel')`,
         {
           gameID: parseInt(gameID),
           selectedUID: parseInt(selectedUID),
@@ -654,7 +717,8 @@ router.post('/copy-message', requireAuth, async (req, res) => {
              (fSenderID = @uid AND fReceiverID = @selectedUID)
            )
            AND CAST(MsgDate AS date) = CAST(@msgDate AS date)
-           AND (IsSettled = 'False' OR IsSettled = 0)`,
+           AND (IsSettled = 'False' OR IsSettled = 0)
+           AND ISNULL(IsAccepted, '') NOT IN ('Rejected', 'Cancelled', 'Cancel')`,
         {
           gameID: parseInt(gameID),
           selectedUID: parseInt(selectedUID),
@@ -665,7 +729,7 @@ router.post('/copy-message', requireAuth, async (req, res) => {
     }
 
     if (!copyRows || !copyRows.length)
-      return res.json({ success: false, message: 'Data Not Found — is date/game mein koi message nahi mila' });
+      return res.json({ success: false, message: 'Data Not Found — is date/game mein koi valid/active message nahi mila' });
 
     for (const row of copyRows) {
       await executeStoredProcedure('InsertChatMessageWhatsappLike', {
@@ -714,6 +778,13 @@ router.post('/save-bulk-forward', requireAuth, async (req, res) => {
     const uniqueIds = [...new Set(chatIDs)];
 
     for (const chatID of uniqueIds) {
+      const chk = await executeQuery(
+        `SELECT IsAccepted FROM Chat WHERE ChatID = @chatID`,
+        { chatID: parseInt(chatID) }
+      );
+      if (chk && chk[0] && ['Rejected', 'Cancelled', 'Cancel'].includes(chk[0].IsAccepted)) {
+        continue;
+      }
       try {
         // Try full params first (newer SP version)
         await executeStoredProcedure('ForWardChatMessage', {
