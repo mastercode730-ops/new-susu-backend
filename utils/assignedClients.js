@@ -18,26 +18,44 @@ async function getAssignedClients(uid, subUID) {
 
   const list = rows || [];
   const cids = new Set(list.map(r => String(r.CID)));
-  const mobiles = new Set(list.map(r => String(r.Mobile || '').trim()).filter(Boolean));
+  const mobiles = new Set(list.map(r => String(r.Mobile || '').replace(/\D/g, '')).filter(Boolean));
+  const rawMobiles = new Set(list.map(r => String(r.Mobile || '').trim()).filter(Boolean));
   const uids = new Set(list.map(r => String(r.CustUID)).filter(Boolean));
   const names = new Set(list.map(r => String(r.CustomerName || '').toLowerCase().trim()).filter(Boolean));
 
   function isMatch(record) {
     if (!record) return false;
+
+    // 1. Direct ID matches (CID, UID, CustUID, fCustID)
     if (record.CID && cids.has(String(record.CID))) return true;
     if (record.UID && uids.has(String(record.UID))) return true;
-    if (record.fCustID && uids.has(String(record.fCustID))) return true;
-    const mob = String(record.Mobile || record.CMobile || '').trim();
-    if (mob) {
-      if (mobiles.has(mob)) return true;
-      for (const m of mobiles) {
-        if (m && (mob.includes(m) || m.includes(mob))) return true;
-        const last5 = m.slice(-5);
-        if (last5 && mob.includes(last5)) return true;
-      }
+    if (record.CustUID && uids.has(String(record.CustUID))) return true;
+    if (record.fCustID && (cids.has(String(record.fCustID)) || uids.has(String(record.fCustID)))) return true;
+
+    // 2. Customer Name matches
+    const cName = String(record.CustomerName1 || record.CustomerName || record.Customer || '').toLowerCase().trim();
+    if (cName) {
+      if (names.has(cName)) return true;
+      const cleanName = cName.replace(/\s+\d+$/, '').trim();
+      if (cleanName && names.has(cleanName)) return true;
     }
-    const cName = String(record.CustomerName || '').toLowerCase().trim();
-    if (cName && names.has(cName)) return true;
+
+    // 3. CMobile (e.g. "CustomerName 12345")
+    if (record.CMobile) {
+      const cmobName = String(record.CMobile).replace(/\s+\d+$/, '').trim().toLowerCase();
+      if (cmobName && names.has(cmobName)) return true;
+      const cmobDigits = String(record.CMobile).replace(/\D/g, '');
+      if (cmobDigits && mobiles.has(cmobDigits)) return true;
+    }
+
+    // 4. Exact Mobile match
+    const rawMob = String(record.Mobile || '').trim();
+    if (rawMob) {
+      if (rawMobiles.has(rawMob)) return true;
+      const cleanMob = rawMob.replace(/\D/g, '');
+      if (cleanMob && mobiles.has(cleanMob)) return true;
+    }
+
     return false;
   }
 
