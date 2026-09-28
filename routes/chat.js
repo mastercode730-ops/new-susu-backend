@@ -177,13 +177,6 @@ router.post('/save-receiver-message', requireAuth, async (req, res) => {
 
     // Update mode
     if (btnText === 'Update(Insert)' && chatId) {
-      const chk = await executeQuery(
-        `SELECT IsAccepted FROM Chat WHERE ChatID = @chatId`,
-        { chatId: parseInt(chatId) }
-      );
-      if (chk && chk[0] && ['Rejected', 'Cancelled', 'Cancel'].includes(chk[0].IsAccepted)) {
-        return res.json({ success: false, message: 'Cannot edit cancelled entry' });
-      }
       await executeStoredProcedure('UpdateChatmsg', {
         ChatID: chatId,
         fSenderID: uid,
