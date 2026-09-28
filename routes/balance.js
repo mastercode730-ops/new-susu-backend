@@ -15,11 +15,18 @@ function toSqlDate(dateStr) {
   const s = String(dateStr).trim();
   const ddmmyyyy = s.match(/^(\d{1,2})\/([A-Za-z]{3})\/(\d{4})$/);
   if (ddmmyyyy) return ddmmyyyy[1].padStart(2, '0') + '/' + ddmmyyyy[2] + '/' + ddmmyyyy[3];
+  const ddmmNumeric = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (ddmmNumeric) {
+    const moIdx = parseInt(ddmmNumeric[2], 10) - 1;
+    const moStr = (moIdx >= 0 && moIdx < 12) ? MONTHS[moIdx] : MONTHS[0];
+    return ddmmNumeric[1].padStart(2, '0') + '/' + moStr + '/' + ddmmNumeric[3];
+  }
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (iso) return iso[3] + '/' + MONTHS[parseInt(iso[2])-1] + '/' + iso[1];
   const ist = getIST();
   return String(ist.getUTCDate()).padStart(2,'0') + '/' + MONTHS[ist.getUTCMonth()] + '/' + ist.getUTCFullYear();
 }
+
 
 // GET /api/balance/latest-date
 router.get('/latest-date', requireAuth, async (req, res) => {
@@ -125,13 +132,14 @@ router.get('/staff-grid', requireAuth, async (req, res) => {
 router.get('/staff-balance', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
-    const subUID = req.user.SubUID || null;
+    const subUID = req.query.staffID || req.user.SubUID || null;
     if (!subUID) return res.json({ success: true, balance: 0 });
     const data = await executeStoredProcedure('StaffBalanceSheet', {
       fUID: uid, OPTYPE: 1, FSTAFFID: subUID
     });
     const total = (data || []).reduce((s, r) => s + (parseFloat(r.Balance) || 0), 0);
-    res.json({ success: true, balance: total });
+    const subusername = data?.[0]?.subusername || '';
+    res.json({ success: true, balance: total, subusername });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

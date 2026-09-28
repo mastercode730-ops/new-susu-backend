@@ -4,6 +4,29 @@ const { requireAuth } = require('../middleware/auth');
 const { executeStoredProcedure, executeQuery } = require('../config/database');
 const { getAssignedClients } = require('../utils/assignedClients');
 
+function getIST() { return new Date(Date.now() + 5.5 * 60 * 60 * 1000); }
+
+function toSqlDate(dateStr) {
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  if (!dateStr) {
+    const ist = getIST();
+    return String(ist.getUTCDate()).padStart(2,'0') + '/' + MONTHS[ist.getUTCMonth()] + '/' + ist.getUTCFullYear();
+  }
+  const s = String(dateStr).trim();
+  const ddmmyyyy = s.match(/^(\d{1,2})\/([A-Za-z]{3})\/(\d{4})$/);
+  if (ddmmyyyy) return ddmmyyyy[1].padStart(2, '0') + '/' + ddmmyyyy[2] + '/' + ddmmyyyy[3];
+  const ddmmNumeric = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (ddmmNumeric) {
+    const moIdx = parseInt(ddmmNumeric[2], 10) - 1;
+    const moStr = (moIdx >= 0 && moIdx < 12) ? MONTHS[moIdx] : MONTHS[0];
+    return ddmmNumeric[1].padStart(2, '0') + '/' + moStr + '/' + ddmmNumeric[3];
+  }
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return iso[3] + '/' + MONTHS[parseInt(iso[2])-1] + '/' + iso[1];
+  const ist = getIST();
+  return String(ist.getUTCDate()).padStart(2,'0') + '/' + MONTHS[ist.getUTCMonth()] + '/' + ist.getUTCFullYear();
+}
+
 // GET /api/accounts/latest-date
 router.get('/latest-date', requireAuth, async (req, res) => {
   try {
@@ -104,7 +127,7 @@ router.post('/', requireAuth, async (req, res) => {
     const finalType = typeMap[type] || type;
     await executeStoredProcedure('CreateTransaction', {
       fCusID: customerUID === 'Self' ? 0 : customerUID,
-      date: date, Type: finalType, Amount: amount,
+      date: toSqlDate(date), Type: finalType, Amount: amount,
       CreatedBy: uid, Narration: narration || '',
       fStaff: (finalType === 'Paid' || finalType === 'Received') && staffID ? staffID : 0
     });
@@ -139,16 +162,17 @@ router.post('/transfer', requireAuth, async (req, res) => {
     const fStaff = staffID && staffID !== '0' ? staffID : 0;
     const label1 = `Transfer To ${toName || toUID}`;
     const label2 = `Transfer From ${fromName || fromUID}`;
+    const sqlDate = toSqlDate(date);
 
     // Entry 1: Received from A — placeholder tag (~tx0) until we know entry 2's AID
     await executeStoredProcedure('CreateTransaction', {
-      fCusID: fromUID, date, Type: 'Received', Amount: amount,
+      fCusID: fromUID, date: sqlDate, Type: 'Received', Amount: amount,
       CreatedBy: uid, Narration: buildNarration(narration, label1, 0), fStaff
     });
     const row1 = await executeQuery(
       `SELECT TOP 1 AID FROM Accounts WHERE CreatedBy=@uid AND fCustID=@fromUID AND [Date]=@date
        AND EntryType='Received' AND Received=@amount ORDER BY AID DESC`,
-      { uid, fromUID, date, amount }
+      { uid, fromUID, date: sqlDate, amount }
     );
     const aid1 = row1?.[0]?.AID;
 
@@ -159,13 +183,13 @@ router.post('/transfer', requireAuth, async (req, res) => {
     let aid2;
     try {
       await executeStoredProcedure('CreateTransaction', {
-        fCusID: toUID, date, Type: 'Paid', Amount: amount,
+        fCusID: toUID, date: sqlDate, Type: 'Paid', Amount: amount,
         CreatedBy: uid, Narration: buildNarration(narration, label2, aid1), fStaff
       });
       const row2 = await executeQuery(
         `SELECT TOP 1 AID FROM Accounts WHERE CreatedBy=@uid AND fCustID=@toUID AND [Date]=@date
          AND EntryType='Paid' AND Paid=@amount ORDER BY AID DESC`,
-        { uid, toUID, date, amount }
+        { uid, toUID, date: sqlDate, amount }
       );
       aid2 = row2?.[0]?.AID;
     } catch (err2) {
