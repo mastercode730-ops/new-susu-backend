@@ -255,13 +255,21 @@ router.get('/show-results', requireAuth, async (req, res) => {
     const { startDate, endDate } = req.query;
     const uid = req.user.UID;
     if (!startDate) return res.json({ success: true, data: [] });
-    const sd = new Date(startDate);
-    const year = sd.getFullYear();
-    const month = sd.getMonth() + 1;
+    const sqlStart = toSqlDate(startDate);
+    const sqlEnd = toSqlDate(endDate || startDate);
+    const dParts = sqlStart.split('/');
+    const M_MAP = {Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+    let year = parseInt(dParts[2], 10);
+    let month = M_MAP[dParts[1]] || parseInt(dParts[1], 10) || 1;
+    if (isNaN(year) || isNaN(month)) {
+      const sd = new Date(sqlStart);
+      year = sd.getFullYear();
+      month = sd.getMonth() + 1;
+    }
     const days = new Date(year, month, 0).getDate();
     const data = await executeStoredProcedure('ShowResult', {
       Year: year.toString(), Month: month.toString(), Days: days,
-      UID: uid, FromDate: startDate, ToDate: endDate || startDate
+      UID: uid, FromDate: sqlStart, ToDate: sqlEnd
     });
     res.json({ success: true, data: data || [] });
   } catch (err) {
