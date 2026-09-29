@@ -91,13 +91,34 @@ router.post('/update', requireAuth, async (req, res) => {
 router.get('/:cid/rates', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
-    const data = await executeQuery(
+    let data = await executeQuery(
       `SELECT CR.*,
+              ISNULL(C.ThirdPartyHissaID, 0) AS ThirdPartyHissaID,
+              ISNULL(C.ThirdPartyHissaPer, 0) AS ThirdPartyHissaPer,
+              ISNULL(C.ThirdPartyCommID, 0) AS ThirdPartyCommID,
+              ISNULL(C.ThirdPartyDaraComm, 0) AS ThirdPartyDaraComm,
+              ISNULL(C.ThirdPartyAkharComm, 0) AS ThirdPartyAkharComm,
               (SELECT TOP 1 UID FROM Users WHERE Mobile = CR.MobileNo OR REPLACE(Mobile, ' ', '') = REPLACE(CR.MobileNo, ' ', '')) AS fUserUID
        FROM CustomersRates CR 
+       LEFT JOIN Customers C ON CR.CID = C.CID
        WHERE CR.CID = @cid AND CR.fUID = @uid`,
       { cid: parseInt(req.params.cid), uid }
     );
+    if (!data || data.length === 0) {
+      data = await executeQuery(
+        `SELECT 0 AS RateID, C.D_PComm, C.D_Amt, C.A_PComm, C.A_Amt, C.Patti, C.Mobile AS MobileNo,
+                C.fUID, C.CID, 'True' AS IsActive,
+                ISNULL(C.ThirdPartyHissaID, 0) AS ThirdPartyHissaID,
+                ISNULL(C.ThirdPartyHissaPer, 0) AS ThirdPartyHissaPer,
+                ISNULL(C.ThirdPartyCommID, 0) AS ThirdPartyCommID,
+                ISNULL(C.ThirdPartyDaraComm, 0) AS ThirdPartyDaraComm,
+                ISNULL(C.ThirdPartyAkharComm, 0) AS ThirdPartyAkharComm,
+                (SELECT TOP 1 UID FROM Users WHERE Mobile = C.Mobile OR REPLACE(Mobile, ' ', '') = REPLACE(C.Mobile, ' ', '')) AS fUserUID
+         FROM Customers C
+         WHERE C.CID = @cid AND C.fUID = @uid`,
+        { cid: parseInt(req.params.cid), uid }
+      );
+    }
     res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -108,13 +129,34 @@ router.get('/:cid/rates', requireAuth, async (req, res) => {
 router.get('/rates/:cid', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
-    const data = await executeQuery(
+    let data = await executeQuery(
       `SELECT CR.*,
+              ISNULL(C.ThirdPartyHissaID, 0) AS ThirdPartyHissaID,
+              ISNULL(C.ThirdPartyHissaPer, 0) AS ThirdPartyHissaPer,
+              ISNULL(C.ThirdPartyCommID, 0) AS ThirdPartyCommID,
+              ISNULL(C.ThirdPartyDaraComm, 0) AS ThirdPartyDaraComm,
+              ISNULL(C.ThirdPartyAkharComm, 0) AS ThirdPartyAkharComm,
               (SELECT TOP 1 UID FROM Users WHERE Mobile = CR.MobileNo OR REPLACE(Mobile, ' ', '') = REPLACE(CR.MobileNo, ' ', '')) AS fUserUID
        FROM CustomersRates CR 
+       LEFT JOIN Customers C ON CR.CID = C.CID
        WHERE CR.CID = @cid AND CR.fUID = @uid`,
       { cid: parseInt(req.params.cid), uid }
     );
+    if (!data || data.length === 0) {
+      data = await executeQuery(
+        `SELECT 0 AS RateID, C.D_PComm, C.D_Amt, C.A_PComm, C.A_Amt, C.Patti, C.Mobile AS MobileNo,
+                C.fUID, C.CID, 'True' AS IsActive,
+                ISNULL(C.ThirdPartyHissaID, 0) AS ThirdPartyHissaID,
+                ISNULL(C.ThirdPartyHissaPer, 0) AS ThirdPartyHissaPer,
+                ISNULL(C.ThirdPartyCommID, 0) AS ThirdPartyCommID,
+                ISNULL(C.ThirdPartyDaraComm, 0) AS ThirdPartyDaraComm,
+                ISNULL(C.ThirdPartyAkharComm, 0) AS ThirdPartyAkharComm,
+                (SELECT TOP 1 UID FROM Users WHERE Mobile = C.Mobile OR REPLACE(Mobile, ' ', '') = REPLACE(C.Mobile, ' ', '')) AS fUserUID
+         FROM Customers C
+         WHERE C.CID = @cid AND C.fUID = @uid`,
+        { cid: parseInt(req.params.cid), uid }
+      );
+    }
     res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

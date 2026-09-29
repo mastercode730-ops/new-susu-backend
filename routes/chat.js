@@ -522,6 +522,64 @@ router.post('/move-message', requireAuth, async (req, res) => {
     }
     if (!toUID) return res.json({ success: false, message: 'TO customer ka UID nahi mila' });
 
+    // Fetch target customer info to ensure Hissa & TP settings are properly populated
+    let hissaCID = parseInt(fHissaPartyID) || 0;
+    let hissaPercent = parseFloat(hissaPerc) || 0;
+    let tpCommCID = parseInt(req.body.ThirdPartyCommID) || 0;
+    let tpDara = parseFloat(req.body.ThirdPartyDaraComm) || 0;
+    let tpAkhar = parseFloat(req.body.ThirdPartyAkharComm) || 0;
+
+    const cleanMob = mobile ? String(mobile).replace(/\D/g, '').slice(-10) : '';
+    const custRows = await executeQuery(
+      `SELECT TOP 1 CID, ThirdPartyHissaID, ThirdPartyHissaPer, ThirdPartyCommID, ThirdPartyDaraComm, ThirdPartyAkharComm
+       FROM Customers
+       WHERE fUID = @uid AND (
+         (Mobile = @mobile OR REPLACE(Mobile, ' ', '') = @cleanMob)
+         OR Mobile = (SELECT TOP 1 Mobile FROM Users WHERE UID = @toUID)
+       )`,
+      { uid: parseInt(uid), mobile: String(mobile || '').trim(), cleanMob, toUID: parseInt(toUID) }
+    );
+    if (custRows && custRows.length > 0) {
+      const cRow = custRows[0];
+      if (!hissaPercent && cRow.ThirdPartyHissaPer) {
+        hissaCID = parseInt(cRow.ThirdPartyHissaID) || 0;
+        hissaPercent = parseFloat(cRow.ThirdPartyHissaPer) || 0;
+      }
+      if (!tpDara && !tpAkhar && (cRow.ThirdPartyDaraComm || cRow.ThirdPartyAkharComm)) {
+        tpCommCID = parseInt(cRow.ThirdPartyCommID) || 0;
+        tpDara = parseFloat(cRow.ThirdPartyDaraComm) || 0;
+        tpAkhar = parseFloat(cRow.ThirdPartyAkharComm) || 0;
+      }
+    }
+
+    // Resolve hissa User UID (Chat.fHissaPartyID stores Users.UID of the Hissa party)
+    let hissaUserUID = 0;
+    if (hissaCID > 0) {
+      const uRows = await executeQuery(
+        `SELECT TOP 1 u.UID FROM Users u
+         INNER JOIN Customers c ON u.Mobile = c.Mobile
+         WHERE c.CID = @hissaCID`,
+        { hissaCID }
+      );
+      if (uRows && uRows.length > 0) {
+        hissaUserUID = uRows[0].UID;
+      } else {
+        const uDirect = await executeQuery(`SELECT TOP 1 UID FROM Users WHERE UID = @hissaCID`, { hissaCID });
+        if (uDirect && uDirect.length > 0) hissaUserUID = uDirect[0].UID;
+      }
+    }
+
+    let tpCommUserUID = 0;
+    if (tpCommCID > 0) {
+      const uRows = await executeQuery(
+        `SELECT TOP 1 u.UID FROM Users u
+         INNER JOIN Customers c ON u.Mobile = c.Mobile
+         WHERE c.CID = @tpCommCID`,
+        { tpCommCID }
+      );
+      if (uRows && uRows.length > 0) tpCommUserUID = uRows[0].UID;
+    }
+
     if (src_D_PComm !== undefined) {
       const tol = 0.01;
       const srcRows = await executeQuery(
@@ -567,7 +625,10 @@ router.post('/move-message', requireAuth, async (req, res) => {
                A_PComm = @aPC, A_Amt = @aA,
                Pati_PComm = @pati,
                fHissaPartyID = @hissaID,
-               HissaPerc = @hissaPer
+               HissaPerc = @hissaPer,
+               ThirdPartyCommID = @tpCommID,
+               ThirdPartyDaraComm = @tpDara,
+               ThirdPartyAkharComm = @tpAkhar
            WHERE ChatID = @chatID`,
           {
             toUID: parseInt(toUID),
@@ -580,8 +641,11 @@ router.post('/move-message', requireAuth, async (req, res) => {
             aPC: parseFloat(A_PComm) || 0,
             aA: parseFloat(A_Amt) || 10,
             pati: parseFloat(Pati_PComm) || 0,
-            hissaID: parseInt(fHissaPartyID) || 0,
-            hissaPer: parseFloat(hissaPerc) || 0,
+            hissaID: parseInt(hissaUserUID) || 0,
+            hissaPer: parseFloat(hissaPercent) || 0,
+            tpCommID: parseInt(tpCommUserUID) || 0,
+            tpDara: parseFloat(tpDara) || 0,
+            tpAkhar: parseFloat(tpAkhar) || 0,
             chatID: row.ChatID
           }
         );
@@ -599,6 +663,9 @@ router.post('/move-message', requireAuth, async (req, res) => {
              Pati_PComm = @pati,
              fHissaPartyID = @hissaID,
              HissaPerc = @hissaPer,
+             ThirdPartyCommID = @tpCommID,
+             ThirdPartyDaraComm = @tpDara,
+             ThirdPartyAkharComm = @tpAkhar,
              subuserID = CASE WHEN @subUID != '' THEN @subUID ELSE subuserID END
          WHERE fGameID = @gameID
            AND (
@@ -620,8 +687,11 @@ router.post('/move-message', requireAuth, async (req, res) => {
           aPC: parseFloat(A_PComm) || 0,
           aA: parseFloat(A_Amt) || 10,
           pati: parseFloat(Pati_PComm) || 0,
-          hissaID: parseInt(fHissaPartyID) || 0,
-          hissaPer: parseFloat(hissaPerc) || 0,
+          hissaID: parseInt(hissaUserUID) || 0,
+          hissaPer: parseFloat(hissaPercent) || 0,
+          tpCommID: parseInt(tpCommUserUID) || 0,
+          tpDara: parseFloat(tpDara) || 0,
+          tpAkhar: parseFloat(tpAkhar) || 0,
           subUID: subUID || '',
           gameID: parseInt(gameID),
           selectedUID: parseInt(selectedUID),
@@ -629,6 +699,30 @@ router.post('/move-message', requireAuth, async (req, res) => {
         }
       );
     }
+
+    // Recalculate results if games already had declared results
+    try {
+      const { calculateGameResult } = require('../utils/resultCalculator');
+      const resRows = await executeQuery(
+        `SELECT Result FROM Result WHERE fGameID = @gid AND CAST(Date AS date) = CAST(@d AS date)`,
+        { gid: parseInt(currentGameID), d: toDateStr }
+      );
+      if (resRows && resRows.length > 0 && resRows[0].Result) {
+        await calculateGameResult(parseInt(currentGameID), toDateStr, resRows[0].Result, parseInt(uid));
+      }
+      if (parseInt(gameID) !== parseInt(currentGameID) || fromDateStr !== toDateStr) {
+        const srcRes = await executeQuery(
+          `SELECT Result FROM Result WHERE fGameID = @gid AND CAST(Date AS date) = CAST(@d AS date)`,
+          { gid: parseInt(gameID), d: fromDateStr }
+        );
+        if (srcRes && srcRes.length > 0 && srcRes[0].Result) {
+          await calculateGameResult(parseInt(gameID), fromDateStr, srcRes[0].Result, parseInt(uid));
+        }
+      }
+    } catch (calcErr) {
+      console.error('Error recalculating results after move:', calcErr.message);
+    }
+
     res.json({ success: true, message: 'Data Move Successfully' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -668,6 +762,36 @@ router.post('/copy-message', requireAuth, async (req, res) => {
       toUID = selectedUID;
     }
     if (!toUID) return res.json({ success: false, message: 'Target customer UID nahi mila' });
+
+    // Fetch target customer info to ensure Hissa & TP settings are properly populated
+    let hissaCID = parseInt(fHissaPartyID) || 0;
+    let hissaPercent = parseFloat(hissaPerc) || 0;
+    let tpCommCID = parseInt(ThirdPartyCommID) || 0;
+    let tpDara = parseFloat(ThirdPartyDaraComm) || 0;
+    let tpAkhar = parseFloat(ThirdPartyAkharComm) || 0;
+
+    const cleanMob = mobile ? String(mobile).replace(/\D/g, '').slice(-10) : '';
+    const custRows = await executeQuery(
+      `SELECT TOP 1 CID, ThirdPartyHissaID, ThirdPartyHissaPer, ThirdPartyCommID, ThirdPartyDaraComm, ThirdPartyAkharComm
+       FROM Customers
+       WHERE fUID = @uid AND (
+         (Mobile = @mobile OR REPLACE(Mobile, ' ', '') = @cleanMob)
+         OR Mobile = (SELECT TOP 1 Mobile FROM Users WHERE UID = @toUID)
+       )`,
+      { uid: parseInt(uid), mobile: String(mobile || '').trim(), cleanMob, toUID: parseInt(toUID) }
+    );
+    if (custRows && custRows.length > 0) {
+      const cRow = custRows[0];
+      if (!hissaPercent && cRow.ThirdPartyHissaPer) {
+        hissaCID = parseInt(cRow.ThirdPartyHissaID) || 0;
+        hissaPercent = parseFloat(cRow.ThirdPartyHissaPer) || 0;
+      }
+      if (!tpDara && !tpAkhar && (cRow.ThirdPartyDaraComm || cRow.ThirdPartyAkharComm)) {
+        tpCommCID = parseInt(cRow.ThirdPartyCommID) || 0;
+        tpDara = parseFloat(cRow.ThirdPartyDaraComm) || 0;
+        tpAkhar = parseFloat(cRow.ThirdPartyAkharComm) || 0;
+      }
+    }
 
     const tol = 0.01;
     let copyRows = [];
@@ -742,14 +866,29 @@ router.post('/copy-message', requireAuth, async (req, res) => {
         A_PComm: parseFloat(A_PComm) || 0,
         A_Amt: parseFloat(A_Amt) || 10,
         Pati_PComm: parseFloat(Pati_PComm) || 0,
-        fHissaPartyID: parseInt(fHissaPartyID) || 0,
-        HissaPerc: parseFloat(hissaPerc) || 0,
+        fHissaPartyID: parseInt(hissaCID) || 0,
+        HissaPerc: parseFloat(hissaPercent) || 0,
         CurrentMsgDate: toDateStr,
-        ThirdPartyCommID: parseInt(ThirdPartyCommID) || 0,
-        ThirdPartyDaraComm: parseFloat(ThirdPartyDaraComm) || 0,
-        ThirdPartyAkharComm: parseFloat(ThirdPartyAkharComm) || 0
+        ThirdPartyCommID: parseInt(tpCommCID) || 0,
+        ThirdPartyDaraComm: parseFloat(tpDara) || 0,
+        ThirdPartyAkharComm: parseFloat(tpAkhar) || 0
       });
     }
+
+    // Recalculate results if target game already had declared result
+    try {
+      const { calculateGameResult } = require('../utils/resultCalculator');
+      const resRows = await executeQuery(
+        `SELECT Result FROM Result WHERE fGameID = @gid AND CAST(Date AS date) = CAST(@d AS date)`,
+        { gid: parseInt(currentGameID), d: toDateStr }
+      );
+      if (resRows && resRows.length > 0 && resRows[0].Result) {
+        await calculateGameResult(parseInt(currentGameID), toDateStr, resRows[0].Result, parseInt(uid));
+      }
+    } catch (calcErr) {
+      console.error('Error recalculating results after copy:', calcErr.message);
+    }
+
     res.json({ success: true, message: 'Data Copy Successfully' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
