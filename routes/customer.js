@@ -64,23 +64,116 @@ router.post('/update', requireAuth, async (req, res) => {
       isSelfComm, isYantriTo, isLimit, isUttar,
       thirdPartyHissaID, thirdPartyHissaPer,
       thirdPartyCommID, thirdPartyDaraComm, thirdPartyAkharComm,
-      thirdPartyLCID, thirdPartyLCPer
+      thirdPartyLCID, thirdPartyLCPer,
+      rateID
     } = req.body;
-    const mob = mobileNo || mobile;
+    const mob = (mobileNo || mobile || '').trim();
     if (!cid) return res.status(400).json({ success: false, message: 'CID required' });
+    const parsedCID = parseInt(cid);
+    const parsedRateID = parseInt(rateID) || 0;
+    const parsedD_PComm = (d_PComm !== undefined && d_PComm !== null && !isNaN(d_PComm)) ? parseFloat(d_PComm) : 0;
+    const parsedD_Amt = (d_Amt !== undefined && d_Amt !== null && !isNaN(d_Amt)) ? parseFloat(d_Amt) : 100;
+    const parsedA_PComm = (a_PComm !== undefined && a_PComm !== null && !isNaN(a_PComm)) ? parseFloat(a_PComm) : 0;
+    const parsedA_Amt = (a_Amt !== undefined && a_Amt !== null && !isNaN(a_Amt)) ? parseFloat(a_Amt) : 10;
+    const parsedPatti = parseInt(patti) || 0;
+    const parsedLC = parseInt(lc) || 0;
+
     await executeStoredProcedure('UpdateCustomers', {
       CustomerName: customerName, Mobile: mob,
-      D_PComm: parseFloat(d_PComm) || 0, D_Amt: parseFloat(d_Amt) || 100, A_PComm: parseFloat(a_PComm) || 0, A_Amt: parseFloat(a_Amt) || 10,
-      Patti: parseInt(patti) || 0, LC: parseInt(lc) || 0,
+      D_PComm: parsedD_PComm, D_Amt: parsedD_Amt, A_PComm: parsedA_PComm, A_Amt: parsedA_Amt,
+      Patti: parsedPatti, LC: parsedLC,
       IsSelfComm: isSelfComm ? true : false,
       IsYantriTo: isYantriTo ? true : false,
-      fId: uid, CID: parseInt(cid), UserID: uid, RateID: 0,
+      fId: uid, CID: parsedCID, UserID: uid, RateID: parsedRateID,
       ThirdPartyHissaID: parseInt(thirdPartyHissaID) || 0, ThirdPartyHissaPer: parseFloat(thirdPartyHissaPer) || 0,
       IsLimit: isLimit ? true : false, IsUttar: isUttar ? true : false,
       ThirdPartyCommID: parseInt(thirdPartyCommID) || 0, ThirdPartyDaraComm: parseFloat(thirdPartyDaraComm) || 0,
       ThirdPartyAkharComm: parseFloat(thirdPartyAkharComm) || 0,
       ThirdPartyLCID: parseInt(thirdPartyLCID) || 0, ThirdPartyLCPer: parseFloat(thirdPartyLCPer) || 0
     });
+
+    if (mob) {
+      await executeQuery(
+        `UPDATE Customers
+         SET Mobile = @mob,
+             D_PComm = @d_PComm,
+             D_Amt = @d_Amt,
+             A_PComm = @a_PComm,
+             A_Amt = @a_Amt,
+             Patti = @patti
+         WHERE CID = @cid AND fUID = @uid`,
+        {
+          cid: parsedCID, uid, mob,
+          d_PComm: parsedD_PComm, d_Amt: parsedD_Amt,
+          a_PComm: parsedA_PComm, a_Amt: parsedA_Amt,
+          patti: parsedPatti
+        }
+      );
+    } else {
+      await executeQuery(
+        `UPDATE Customers
+         SET D_PComm = @d_PComm,
+             D_Amt = @d_Amt,
+             A_PComm = @a_PComm,
+             A_Amt = @a_Amt,
+             Patti = @patti
+         WHERE CID = @cid AND fUID = @uid`,
+        {
+          cid: parsedCID, uid,
+          d_PComm: parsedD_PComm, d_Amt: parsedD_Amt,
+          a_PComm: parsedA_PComm, a_Amt: parsedA_Amt,
+          patti: parsedPatti
+        }
+      );
+    }
+
+    const existingRates = await executeQuery(
+      `SELECT RateID FROM CustomersRates WHERE CID = @cid AND fUID = @uid ORDER BY RateID ASC`,
+      { cid: parsedCID, uid }
+    );
+
+    if (existingRates && existingRates.length > 0) {
+      const targetRateID = (parsedRateID && existingRates.some(r => r.RateID == parsedRateID))
+        ? parsedRateID
+        : existingRates[0].RateID;
+
+      await executeQuery(
+        `UPDATE CustomersRates
+         SET D_PComm = @d_PComm,
+             D_Amt = @d_Amt,
+             A_PComm = @a_PComm,
+             A_Amt = @a_Amt,
+             Patti = @patti,
+             MobileNo = ISNULL(NULLIF(@mob, ''), MobileNo)
+         WHERE RateID = @rateID`,
+        {
+          rateID: targetRateID,
+          d_PComm: parsedD_PComm, d_Amt: parsedD_Amt,
+          a_PComm: parsedA_PComm, a_Amt: parsedA_Amt,
+          patti: parsedPatti,
+          mob
+        }
+      );
+
+      if (mob) {
+        await executeQuery(
+          `UPDATE CustomersRates SET MobileNo = @mob WHERE CID = @cid AND fUID = @uid`,
+          { cid: parsedCID, uid, mob }
+        );
+      }
+    } else {
+      await executeQuery(
+        `INSERT INTO CustomersRates (CID, fUID, MobileNo, D_PComm, D_Amt, A_PComm, A_Amt, Patti, IsActive)
+         VALUES (@cid, @uid, @mob, @d_PComm, @d_Amt, @a_PComm, @a_Amt, @patti, 'True')`,
+        {
+          cid: parsedCID, uid, mob,
+          d_PComm: parsedD_PComm, d_Amt: parsedD_Amt,
+          a_PComm: parsedA_PComm, a_Amt: parsedA_Amt,
+          patti: parsedPatti
+        }
+      );
+    }
+
     res.json({ success: true, message: 'Customer updated' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
