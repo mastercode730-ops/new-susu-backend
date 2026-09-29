@@ -159,7 +159,7 @@ router.get('/user-games/:uid', requireAuth, async (req, res) => {
 // GET /api/home/customer-rates/:cid
 router.get('/customer-rates/:cid', requireAuth, async (req, res) => {
   try {
-    const data = await executeQuery(
+    let data = await executeQuery(
       `SELECT ISNULL(CAST(CAST(CustomersRates.D_PComm AS float) AS varchar) + '/' +
         CAST(CAST(CustomersRates.D_Amt AS float) AS varchar) + '-' +
         CAST(CAST(CustomersRates.A_PComm AS float) AS varchar) + '/' +
@@ -169,12 +169,30 @@ router.get('/customer-rates/:cid', requireAuth, async (req, res) => {
         CustomersRates.D_PComm, CustomersRates.D_Amt, CustomersRates.A_PComm,
         CustomersRates.A_Amt, CustomersRates.Patti,
         ISNULL(Customers.ThirdPartyHissaID, 0) AS ThirdPartyHissaID,
-        ISNULL(Customers.ThirdPartyHissaPer, 0) AS ThirdPartyHissaPer
+        ISNULL(Customers.ThirdPartyHissaPer, 0) AS ThirdPartyHissaPer,
+        ISNULL(Customers.ThirdPartyCommID, 0) AS ThirdPartyCommID,
+        ISNULL(Customers.ThirdPartyDaraComm, 0) AS ThirdPartyDaraComm,
+        ISNULL(Customers.ThirdPartyAkharComm, 0) AS ThirdPartyAkharComm
        FROM CustomersRates
        INNER JOIN Customers ON CustomersRates.CID = Customers.CID
        WHERE CustomersRates.CID = @cid`,
       { cid: req.params.cid }
     );
+    if (!data || data.length === 0) {
+      data = await executeQuery(
+        `SELECT '0/100-0/10-0' AS Rate,
+          C.fUID, 0 AS RateID, C.Mobile AS MobileNo,
+          C.D_PComm, C.D_Amt, C.A_PComm, C.A_Amt, C.Patti,
+          ISNULL(C.ThirdPartyHissaID, 0) AS ThirdPartyHissaID,
+          ISNULL(C.ThirdPartyHissaPer, 0) AS ThirdPartyHissaPer,
+          ISNULL(C.ThirdPartyCommID, 0) AS ThirdPartyCommID,
+          ISNULL(C.ThirdPartyDaraComm, 0) AS ThirdPartyDaraComm,
+          ISNULL(C.ThirdPartyAkharComm, 0) AS ThirdPartyAkharComm
+         FROM Customers C
+         WHERE C.CID = @cid`,
+        { cid: req.params.cid }
+      );
+    }
     res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

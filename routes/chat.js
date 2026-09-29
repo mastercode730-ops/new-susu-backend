@@ -222,6 +222,47 @@ router.post('/save-receiver-message', requireAuth, async (req, res) => {
       else formattedDate = String(date).substring(0, 10);
     }
 
+    // Resolve Hissa & TP settings with fallback to Customers master table if not provided
+    let effHissaID = parseInt(fHissaPartyID) || 0;
+    let effHissaPerc = parseFloat(HissaPerc) || 0;
+    let effTPCommID = parseInt(ThirdPartyCommID) || 0;
+    let effTPDara = parseFloat(ThirdPartyDaraComm) || 0;
+    let effTPAkhar = parseFloat(ThirdPartyAkharComm) || 0;
+
+    if (!effHissaID || !effHissaPerc) {
+      const custHissa = await executeQuery(
+        `SELECT TOP 1 ThirdPartyHissaID, ThirdPartyHissaPer, ThirdPartyCommID, ThirdPartyDaraComm, ThirdPartyAkharComm 
+         FROM Customers 
+         WHERE fUID = @uid AND (
+           Mobile = (SELECT TOP 1 Mobile FROM Users WHERE UID = @rxUID)
+           OR REPLACE(Mobile, ' ', '') = (SELECT TOP 1 REPLACE(Mobile, ' ', '') FROM Users WHERE UID = @rxUID)
+         )`,
+        { uid: parseInt(uid), rxUID: parseInt(resolvedReceiverUID) }
+      );
+      if (custHissa && custHissa.length > 0) {
+        if (!effHissaID && custHissa[0].ThirdPartyHissaID) effHissaID = parseInt(custHissa[0].ThirdPartyHissaID) || 0;
+        if (!effHissaPerc && custHissa[0].ThirdPartyHissaPer) effHissaPerc = parseFloat(custHissa[0].ThirdPartyHissaPer) || 0;
+        if (!effTPCommID && custHissa[0].ThirdPartyCommID) effTPCommID = parseInt(custHissa[0].ThirdPartyCommID) || 0;
+        if (!effTPDara && custHissa[0].ThirdPartyDaraComm) effTPDara = parseFloat(custHissa[0].ThirdPartyDaraComm) || 0;
+        if (!effTPAkhar && custHissa[0].ThirdPartyAkharComm) effTPAkhar = parseFloat(custHissa[0].ThirdPartyAkharComm) || 0;
+      }
+    }
+
+    // InsertChatMessageWhatsappLike expects @fHissaPartyID to be Customers.CID
+    if (effHissaID > 0) {
+      const checkC = await executeQuery(`SELECT TOP 1 CID FROM Customers WHERE CID = @effHissaID`, { effHissaID });
+      if (!checkC || checkC.length === 0) {
+        const fromU = await executeQuery(
+          `SELECT TOP 1 CID FROM Customers WHERE (
+            Mobile = (SELECT TOP 1 Mobile FROM Users WHERE UID = @effHissaID)
+            OR REPLACE(Mobile, ' ', '') = (SELECT TOP 1 REPLACE(Mobile, ' ', '') FROM Users WHERE UID = @effHissaID)
+          )`,
+          { effHissaID }
+        );
+        if (fromU && fromU.length > 0) effHissaID = fromU[0].CID;
+      }
+    }
+
     // Insert mode
     await executeStoredProcedure('InsertChatMessageWhatsappLike', {
       fSenderID: uid,
@@ -240,13 +281,29 @@ router.post('/save-receiver-message', requireAuth, async (req, res) => {
       A_PComm: parseFloat(A_PComm) || 0,
       A_Amt: parseFloat(A_Amt) || 10,
       Pati_PComm: parseFloat(Pati_PComm) || 0,
-      fHissaPartyID: fHissaPartyID || '0',
-      HissaPerc: parseFloat(HissaPerc) || 0,
+      fHissaPartyID: effHissaID || 0,
+      HissaPerc: parseFloat(effHissaPerc) || 0,
       CurrentMsgDate: formattedDate,
-      ThirdPartyCommID: ThirdPartyCommID || '0',
-      ThirdPartyDaraComm: parseFloat(ThirdPartyDaraComm) || 0,
-      ThirdPartyAkharComm: parseFloat(ThirdPartyAkharComm) || 0
+      ThirdPartyCommID: effTPCommID || 0,
+      ThirdPartyDaraComm: parseFloat(effTPDara) || 0,
+      ThirdPartyAkharComm: parseFloat(effTPAkhar) || 0
     });
+
+    // If game result already exists on that date, immediately recalculate
+    if (formattedDate) {
+      try {
+        const { calculateGameResult } = require('../utils/resultCalculator');
+        const resRows = await executeQuery(
+          `SELECT Result FROM Result WHERE fGameID = @gid AND CAST(Date AS date) = CAST(@d AS date)`,
+          { gid: parseInt(gameId), d: formattedDate }
+        );
+        if (resRows && resRows.length > 0 && resRows[0].Result) {
+          await calculateGameResult(parseInt(gameId), formattedDate, resRows[0].Result, parseInt(uid));
+        }
+      } catch (calcErr) {
+        console.warn('Post-save calculateGameResult error:', calcErr.message);
+      }
+    }
     res.json({ success: true, message: 'SuccessFully' });
   } catch (err) {
     console.error('save-receiver-message:', err.message);
@@ -848,6 +905,21 @@ router.post('/copy-message', requireAuth, async (req, res) => {
     if (!copyRows || !copyRows.length)
       return res.json({ success: false, message: 'Data Not Found — is date/game mein koi valid/active message nahi mila' });
 
+    let effHissaCID = parseInt(hissaCID) || 0;
+    if (effHissaCID > 0) {
+      const checkC = await executeQuery(`SELECT TOP 1 CID FROM Customers WHERE CID = @effHissaCID`, { effHissaCID });
+      if (!checkC || checkC.length === 0) {
+        const fromU = await executeQuery(
+          `SELECT TOP 1 CID FROM Customers WHERE (
+            Mobile = (SELECT TOP 1 Mobile FROM Users WHERE UID = @effHissaCID)
+            OR REPLACE(Mobile, ' ', '') = (SELECT TOP 1 REPLACE(Mobile, ' ', '') FROM Users WHERE UID = @effHissaCID)
+          )`,
+          { effHissaCID }
+        );
+        if (fromU && fromU.length > 0) effHissaCID = fromU[0].CID;
+      }
+    }
+
     for (const row of copyRows) {
       await executeStoredProcedure('InsertChatMessageWhatsappLike', {
         fSenderID: uid,
@@ -866,7 +938,7 @@ router.post('/copy-message', requireAuth, async (req, res) => {
         A_PComm: parseFloat(A_PComm) || 0,
         A_Amt: parseFloat(A_Amt) || 10,
         Pati_PComm: parseFloat(Pati_PComm) || 0,
-        fHissaPartyID: parseInt(hissaCID) || 0,
+        fHissaPartyID: parseInt(effHissaCID) || 0,
         HissaPerc: parseFloat(hissaPercent) || 0,
         CurrentMsgDate: toDateStr,
         ThirdPartyCommID: parseInt(tpCommCID) || 0,
