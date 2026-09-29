@@ -5,6 +5,23 @@ const { executeStoredProcedure, executeQuery } = require('../config/database');
 
 function getIST() { return new Date(Date.now() + 5.5 * 3600000); }
 
+function toSqlDate(dateStr) {
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  if (!dateStr) return '';
+  const s = String(dateStr).trim();
+  const ddmmyyyy = s.match(/^(\d{1,2})\/([A-Za-z]{3})\/(\d{4})$/);
+  if (ddmmyyyy) return ddmmyyyy[1].padStart(2, '0') + '/' + ddmmyyyy[2] + '/' + ddmmyyyy[3];
+  const ddmmNumeric = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (ddmmNumeric) {
+    const moIdx = parseInt(ddmmNumeric[2], 10) - 1;
+    const moStr = (moIdx >= 0 && moIdx < 12) ? MONTHS[moIdx] : MONTHS[0];
+    return ddmmNumeric[1].padStart(2, '0') + '/' + moStr + '/' + ddmmNumeric[3];
+  }
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return iso[3] + '/' + MONTHS[parseInt(iso[2], 10)-1] + '/' + iso[1];
+  return s;
+}
+
 function parseAnyDate(str) {
   if (!str) return new Date();
   const s = String(str).trim();
@@ -122,7 +139,7 @@ router.get('/agents', requireAuth, async (req, res) => {
     const { gid, date } = req.query;
     const uid = String(req.user.UID);
     const data = await executeStoredProcedure('GetMyCustomers', {
-      fSenderID: uid, Filter: '', FGameID: gid, Dates: date
+      fSenderID: uid, Filter: '', FGameID: gid, Dates: toSqlDate(date) || date
     });
     res.json({ success: true, data: data || [] });
   } catch (err) {

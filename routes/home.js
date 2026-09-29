@@ -4,6 +4,23 @@ const { requireAuth } = require('../middleware/auth');
 const { executeStoredProcedure, executeQuery } = require('../config/database');
 const { getAssignedClients } = require('../utils/assignedClients');
 
+function toSqlDate(dateStr) {
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  if (!dateStr) return '';
+  const s = String(dateStr).trim();
+  const ddmmyyyy = s.match(/^(\d{1,2})\/([A-Za-z]{3})\/(\d{4})$/);
+  if (ddmmyyyy) return ddmmyyyy[1].padStart(2, '0') + '/' + ddmmyyyy[2] + '/' + ddmmyyyy[3];
+  const ddmmNumeric = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (ddmmNumeric) {
+    const moIdx = parseInt(ddmmNumeric[2], 10) - 1;
+    const moStr = (moIdx >= 0 && moIdx < 12) ? MONTHS[moIdx] : MONTHS[0];
+    return ddmmNumeric[1].padStart(2, '0') + '/' + moStr + '/' + ddmmNumeric[3];
+  }
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return iso[3] + '/' + MONTHS[parseInt(iso[2], 10)-1] + '/' + iso[1];
+  return s;
+}
+
 router.get('/games', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
@@ -80,7 +97,7 @@ router.get('/absent-customers', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
     const { gameID, date } = req.query;
-    const data = await executeStoredProcedure('CheckAbsentCustomers', { UID: uid, GameID: gameID, MsgDate: date });
+    const data = await executeStoredProcedure('CheckAbsentCustomers', { UID: uid, GameID: gameID, MsgDate: toSqlDate(date) || date });
     res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
