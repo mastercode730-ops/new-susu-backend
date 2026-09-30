@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { requireAuth } = require('../middleware/auth');
 const { executeStoredProcedure, executeQuery } = require('../config/database');
+const { getAssignedClients } = require('../utils/assignedClients');
 
 function getIST() { return new Date(Date.now() + 5.5 * 3600000); }
 
@@ -136,12 +137,49 @@ router.get('/latest-date', requireAuth, async (req, res) => {
 // GET /api/yantri/agents?gid=X&date=X
 router.get('/agents', requireAuth, async (req, res) => {
   try {
-    const { gid, date } = req.query;
     const uid = String(req.user.UID);
-    const data = await executeStoredProcedure('GetMyCustomers', {
-      fSenderID: uid, Filter: '', FGameID: gid, Dates: toSqlDate(date) || date
+    const assigned = await getAssignedClients(uid, req.user.SubUID);
+    let list = [];
+    try {
+      list = await executeStoredProcedure('FetchReceiverList', { fUID: uid, Filter: '' });
+    } catch (e) {}
+
+    // Also get all customers from Customers table to cover all customers
+    try {
+      const allCust = await executeQuery(
+        `SELECT DISTINCT c.CustomerName, ISNULL(u.UID, c.CID) AS UID, c.CID, c.Mobile
+         FROM Customers c
+         LEFT JOIN Users u ON u.Mobile = c.Mobile
+         WHERE c.fUID = @uid AND c.CustomerName IS NOT NULL AND LTRIM(RTRIM(c.CustomerName)) <> ''`,
+        { uid }
+      );
+      const seen = new Set((list || []).map(r => String(r.UID || r.fSenderID || r.CID)));
+      (allCust || []).forEach(c => {
+        const id = String(c.UID || c.CID);
+        if (!seen.has(id)) {
+          seen.add(id);
+          list.push(c);
+        }
+      });
+    } catch (e) {}
+
+    if (assigned && list && list.length) {
+      list = list.filter(r => assigned.isMatch(r));
+    }
+
+    list.sort((a, b) => (a.CustomerName || '').localeCompare(b.CustomerName || ''));
+
+    const formatted = list.map(r => {
+      const sendId = (r.UID && String(r.UID) !== '0') ? r.UID : ((r.fSenderID && String(r.fSenderID) !== '0') ? r.fSenderID : r.CID);
+      return {
+        fSenderID: sendId,
+        UID: sendId,
+        CustomerName: r.CustomerName || r.Name || r.Mobile || 'Unknown',
+        Mobile: r.Mobile || ''
+      };
     });
-    res.json({ success: true, data: data || [] });
+
+    res.json({ success: true, data: formatted });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
