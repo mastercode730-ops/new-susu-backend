@@ -169,14 +169,50 @@ router.get('/access-rights/:id', requireAuth, async (req, res) => {
 // POST /api/admin/access-rights
 router.post('/access-rights', requireAuth, async (req, res) => {
   try {
-    const { subUserID, addContacts, addGames, result, hisab, hisabSummary,
-            dateWiseHisab, accounts, showAllAccounts, balance, lc, yantri } = req.body;
-    await executeStoredProcedure('InsertUpdateAccessRight', {
-      fUID: req.user.UID, ARfSatffID: subUserID,
-      ADDContacts: !!addContacts, ADDGames: !!addGames, Result: !!result, Hisab: !!hisab,
-      HisabSummary: !!hisabSummary, DateWiseHisab: !!dateWiseHisab, Accounts: !!accounts,
-      ShowAllAccounts: !!showAllAccounts, Balance: !!balance, LC: !!lc, Yantri: !!yantri
-    });
+    const { subUserID, addContacts, addGames, result, findChat, hisab, hisabSummary,
+            dateWiseHisab, accounts, showAllAccounts, subUsers, balance, lc, plYantri, yantri, absentReport, changePassword } = req.body;
+    const uid = req.user.UID;
+
+    const existing = await executeQuery(
+      `SELECT COUNT(*) AS cnt FROM AccessRight WHERE ARfSatffID=@subUserID AND fUID=@uid`,
+      { subUserID, uid }
+    );
+    const count = existing?.[0]?.cnt || 0;
+
+    if (count === 0) {
+      await executeQuery(
+        `INSERT INTO AccessRight
+         (fUID, ARfSatffID, ADDContacts, ADDGames, Result, FindChat, Hisab, HisabSummary, DateWiseHisab, Accounts, ShowAllAccounts, SubUsers, Balance, LC, PLYantri, Yantri, AbsentReport, ChangePassword)
+         VALUES
+         (@uid, @subUserID, @addContacts, @addGames, @result, @findChat, @hisab, @hisabSummary, @dateWiseHisab, @accounts, @showAllAccounts, @subUsers, @balance, @lc, @plYantri, @yantri, @absentReport, @changePassword)`,
+        {
+          uid, subUserID,
+          addContacts: !!addContacts, addGames: !!addGames, result: !!result, findChat: !!findChat,
+          hisab: !!hisab, hisabSummary: !!hisabSummary, dateWiseHisab: !!dateWiseHisab,
+          accounts: !!accounts, showAllAccounts: !!showAllAccounts, subUsers: !!subUsers,
+          balance: !!balance, lc: !!lc, plYantri: !!plYantri, yantri: !!yantri,
+          absentReport: !!absentReport, changePassword: !!changePassword
+        }
+      );
+    } else {
+      await executeQuery(
+        `UPDATE AccessRight SET
+         ADDContacts=@addContacts, ADDGames=@addGames, Result=@result, FindChat=@findChat,
+         Hisab=@hisab, HisabSummary=@hisabSummary, DateWiseHisab=@dateWiseHisab,
+         Accounts=@accounts, ShowAllAccounts=@showAllAccounts, SubUsers=@subUsers,
+         Balance=@balance, LC=@lc, PLYantri=@plYantri, Yantri=@yantri,
+         AbsentReport=@absentReport, ChangePassword=@changePassword
+         WHERE ARfSatffID=@subUserID AND fUID=@uid`,
+        {
+          uid, subUserID,
+          addContacts: !!addContacts, addGames: !!addGames, result: !!result, findChat: !!findChat,
+          hisab: !!hisab, hisabSummary: !!hisabSummary, dateWiseHisab: !!dateWiseHisab,
+          accounts: !!accounts, showAllAccounts: !!showAllAccounts, subUsers: !!subUsers,
+          balance: !!balance, lc: !!lc, plYantri: !!plYantri, yantri: !!yantri,
+          absentReport: !!absentReport, changePassword: !!changePassword
+        }
+      );
+    }
     res.json({ success: true, message: 'Access rights saved' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

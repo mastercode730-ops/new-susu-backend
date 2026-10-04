@@ -25,14 +25,19 @@ async function bindAccessRight(staffID) {
         ADDContacts: isBitTrue(ar.ADDContacts),
         ADDGames: isBitTrue(ar.ADDGames),
         Result: isBitTrue(ar.Result),
+        FindChat: isBitTrue(ar.FindChat),
         Hisab: isBitTrue(ar.Hisab),
         HisabSummary: isBitTrue(ar.HisabSummary),
         DateWiseHisab: isBitTrue(ar.DateWiseHisab),
         Accounts: isBitTrue(ar.Accounts),
         ShowAllAccounts: isBitTrue(ar.ShowAllAccounts),
+        SubUsers: isBitTrue(ar.SubUsers),
         Balance: isBitTrue(ar.Balance),
         LC: isBitTrue(ar.LC),
-        Yantri: isBitTrue(ar.Yantri)
+        PLYantri: isBitTrue(ar.PLYantri),
+        Yantri: isBitTrue(ar.Yantri),
+        AbsentReport: isBitTrue(ar.AbsentReport),
+        ChangePassword: isBitTrue(ar.ChangePassword)
       };
     }
     return getDefaultAccess();
@@ -41,10 +46,10 @@ async function bindAccessRight(staffID) {
 
 function getDefaultAccess() {
   return {
-    ADDContacts: false, ADDGames: false, Result: false,
+    ADDContacts: false, ADDGames: false, Result: false, FindChat: false,
     Hisab: false, HisabSummary: false, DateWiseHisab: false,
-    Accounts: false, ShowAllAccounts: false, Balance: false,
-    LC: false, Yantri: false
+    Accounts: false, ShowAllAccounts: false, SubUsers: false, Balance: false,
+    LC: false, PLYantri: false, Yantri: false, AbsentReport: false, ChangePassword: false
   };
 }
 
