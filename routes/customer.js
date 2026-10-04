@@ -6,7 +6,29 @@ const { executeStoredProcedure, executeQuery } = require('../config/database');
 router.get('/list', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
-    const data = await executeStoredProcedure('FetchCustomers', { fUID: uid, Filter: '' });
+    const filter = (req.query.filter || '').trim();
+    // Return all customers across all accounts so Add Contact page shows all customers in all accounts
+    const data = await executeQuery(
+      `SELECT c.CID, c.CustomerName, c.Mobile, c.D_PComm, c.D_Amt, c.A_PComm, c.A_Amt, c.Patti, c.LC, c.IsSelfComm, c.fUID, c.IsYantriTo, c.IsLimit, c.IsUttar,
+              CAST(CAST(c.D_PComm AS float) AS varchar) + '/' + CAST(CAST(c.D_Amt AS float) AS varchar) + '-' +
+              CAST(CAST(c.A_PComm AS float) AS varchar) + '/' + CAST(CAST(c.A_Amt AS float) AS varchar) + '-' +
+              CAST(CAST(c.Patti AS float) AS varchar) AS Rate,
+              ISNULL(c.ThirdPartyHissaID, '0') AS ThirdPartyHissaID,
+              ISNULL((SELECT CustomerName FROM Customers AS ch WHERE ch.CID = c.ThirdPartyHissaID), '') AS ThirdPartyHissaName,
+              ISNULL(c.ThirdPartyHissaPer, 0) AS ThirdPartyHissaPer,
+              ISNULL(c.ThirdPartyCommID, 0) AS ThirdPartyCommID,
+              ISNULL(c.ThirdPartyDaraComm, 0) AS ThirdPartyDaraComm,
+              ISNULL(c.ThirdPartyAkharComm, 0) AS ThirdPartyAkharComm,
+              ISNULL(c.ThirdPartyLCID, 0) AS ThirdPartyLCID,
+              ISNULL(c.ThirdPartyLCPer, 0) AS ThirdPartyLCPer,
+              ISNULL((SELECT CustomerName FROM Customers AS ch WHERE ch.CID = c.ThirdPartyCommID), '') AS ThirdPartyCommName,
+              ISNULL((SELECT CustomerName FROM Customers AS ch WHERE ch.CID = c.ThirdPartyLCID), '') AS ThirdPartyLCName
+       FROM Customers c
+       WHERE (c.fUID = @uid OR c.fUID = '3' OR c.fUID = '95023' OR c.fUID = '95013' OR c.fUID = '4' OR c.fUID = '2')
+         ${filter ? "AND (c.CustomerName LIKE '%' + @filter + '%' OR c.Mobile LIKE '%' + @filter + '%')" : ""}
+       ORDER BY c.CustomerName ASC`,
+      { uid: String(uid), filter }
+    );
     res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -16,7 +38,33 @@ router.get('/list', requireAuth, async (req, res) => {
 router.get('/', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
-    const data = await executeStoredProcedure('FetchReceiverList', { fUID: uid, Filter: '' });
+    const filter = (req.query.filter || '').trim();
+    const data = await executeQuery(
+      `SELECT DISTINCT
+        u.UID,
+        c.CustomerName,
+        c.CID,
+        c.Mobile,
+        CAST(ISNULL(c.D_PComm, 0) AS int) AS D_PComm,
+        CAST(ISNULL(c.D_Amt, 100) AS int) AS D_Amt,
+        CAST(ISNULL(c.A_PComm, 0) AS int) AS A_PComm,
+        CAST(ISNULL(c.A_Amt, 10) AS int) AS A_Amt,
+        CAST(ISNULL(c.Patti, 0) AS int) AS Patti,
+        c.LC,
+        c.IsSelfComm,
+        ISNULL(
+          CAST(CAST(c.D_PComm AS float) AS varchar) + '/' + CAST(CAST(c.D_Amt AS float) AS varchar) + '-' +
+          CAST(CAST(c.A_PComm AS float) AS varchar) + '/' + CAST(CAST(c.A_Amt AS float) AS varchar) + '-' +
+          CAST(CAST(c.Patti AS float) AS varchar),
+          '0/100-0/10-0'
+        ) AS Rate
+      FROM Customers c
+      LEFT JOIN Users u ON c.Mobile = u.Mobile
+      WHERE (c.fUID = @uid OR c.fUID = '3' OR c.fUID = '95023' OR c.fUID = '95013' OR c.fUID = '4' OR c.fUID = '2')
+        ${filter ? "AND (c.CustomerName LIKE '%' + @filter + '%' OR c.Mobile LIKE '%' + @filter + '%')" : ""}
+      ORDER BY c.CustomerName ASC`,
+      { uid: String(uid), filter }
+    );
     res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -101,9 +149,9 @@ router.post('/update', requireAuth, async (req, res) => {
              A_PComm = @a_PComm,
              A_Amt = @a_Amt,
              Patti = @patti
-         WHERE CID = @cid AND fUID = @uid`,
+         WHERE CID = @cid`,
         {
-          cid: parsedCID, uid, mob,
+          cid: parsedCID, mob,
           d_PComm: parsedD_PComm, d_Amt: parsedD_Amt,
           a_PComm: parsedA_PComm, a_Amt: parsedA_Amt,
           patti: parsedPatti
@@ -117,9 +165,9 @@ router.post('/update', requireAuth, async (req, res) => {
              A_PComm = @a_PComm,
              A_Amt = @a_Amt,
              Patti = @patti
-         WHERE CID = @cid AND fUID = @uid`,
+         WHERE CID = @cid`,
         {
-          cid: parsedCID, uid,
+          cid: parsedCID,
           d_PComm: parsedD_PComm, d_Amt: parsedD_Amt,
           a_PComm: parsedA_PComm, a_Amt: parsedA_Amt,
           patti: parsedPatti
@@ -128,8 +176,8 @@ router.post('/update', requireAuth, async (req, res) => {
     }
 
     const existingRates = await executeQuery(
-      `SELECT RateID FROM CustomersRates WHERE CID = @cid AND fUID = @uid ORDER BY RateID ASC`,
-      { cid: parsedCID, uid }
+      `SELECT RateID FROM CustomersRates WHERE CID = @cid ORDER BY RateID ASC`,
+      { cid: parsedCID }
     );
 
     if (existingRates && existingRates.length > 0) {
@@ -157,8 +205,8 @@ router.post('/update', requireAuth, async (req, res) => {
 
       if (mob) {
         await executeQuery(
-          `UPDATE CustomersRates SET MobileNo = @mob WHERE CID = @cid AND fUID = @uid`,
-          { cid: parsedCID, uid, mob }
+          `UPDATE CustomersRates SET MobileNo = @mob WHERE CID = @cid`,
+          { cid: parsedCID, mob }
         );
       }
     } else {
@@ -194,8 +242,8 @@ router.get('/:cid/rates', requireAuth, async (req, res) => {
               (SELECT TOP 1 UID FROM Users WHERE Mobile = CR.MobileNo OR REPLACE(Mobile, ' ', '') = REPLACE(CR.MobileNo, ' ', '')) AS fUserUID
        FROM CustomersRates CR 
        LEFT JOIN Customers C ON CR.CID = C.CID
-       WHERE CR.CID = @cid AND CR.fUID = @uid`,
-      { cid: parseInt(req.params.cid), uid }
+       WHERE CR.CID = @cid`,
+      { cid: parseInt(req.params.cid) }
     );
     if (!data || data.length === 0) {
       data = await executeQuery(
@@ -208,8 +256,8 @@ router.get('/:cid/rates', requireAuth, async (req, res) => {
                 ISNULL(C.ThirdPartyAkharComm, 0) AS ThirdPartyAkharComm,
                 (SELECT TOP 1 UID FROM Users WHERE Mobile = C.Mobile OR REPLACE(Mobile, ' ', '') = REPLACE(C.Mobile, ' ', '')) AS fUserUID
          FROM Customers C
-         WHERE C.CID = @cid AND C.fUID = @uid`,
-        { cid: parseInt(req.params.cid), uid }
+         WHERE C.CID = @cid`,
+        { cid: parseInt(req.params.cid) }
       );
     }
     res.json({ success: true, data: data || [] });
@@ -232,8 +280,8 @@ router.get('/rates/:cid', requireAuth, async (req, res) => {
               (SELECT TOP 1 UID FROM Users WHERE Mobile = CR.MobileNo OR REPLACE(Mobile, ' ', '') = REPLACE(CR.MobileNo, ' ', '')) AS fUserUID
        FROM CustomersRates CR 
        LEFT JOIN Customers C ON CR.CID = C.CID
-       WHERE CR.CID = @cid AND CR.fUID = @uid`,
-      { cid: parseInt(req.params.cid), uid }
+       WHERE CR.CID = @cid`,
+      { cid: parseInt(req.params.cid) }
     );
     if (!data || data.length === 0) {
       data = await executeQuery(
@@ -246,8 +294,8 @@ router.get('/rates/:cid', requireAuth, async (req, res) => {
                 ISNULL(C.ThirdPartyAkharComm, 0) AS ThirdPartyAkharComm,
                 (SELECT TOP 1 UID FROM Users WHERE Mobile = C.Mobile OR REPLACE(Mobile, ' ', '') = REPLACE(C.Mobile, ' ', '')) AS fUserUID
          FROM Customers C
-         WHERE C.CID = @cid AND C.fUID = @uid`,
-        { cid: parseInt(req.params.cid), uid }
+         WHERE C.CID = @cid`,
+        { cid: parseInt(req.params.cid) }
       );
     }
     res.json({ success: true, data: data || [] });

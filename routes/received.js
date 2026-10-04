@@ -81,16 +81,36 @@ router.get('/contacts', requireAuth, async (req, res) => {
 router.get('/receiver-list', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
-    const filter = req.query.filter || '';
-    const assigned = await getAssignedClients(uid, req.user.SubUID);
-    let data = await executeStoredProcedure('FetchReceiverList', {
-      fUID: String(uid), Filter: filter
-    });
-    data = data || [];
-    if (assigned) {
-      data = data.filter(r => assigned.isMatch(r));
-    }
-    res.json({ success: true, data });
+    const filter = (req.query.filter || '').trim();
+    // Dashboard customer list: MUST NOT depend on AssignClientToStaff module.
+    // All customers across all accounts appear so anyone can make entries.
+    const query = `
+      SELECT DISTINCT
+        u.UID,
+        c.CustomerName,
+        c.CID,
+        c.Mobile,
+        CAST(ISNULL(c.D_PComm, 0) AS int) AS D_PComm,
+        CAST(ISNULL(c.D_Amt, 100) AS int) AS D_Amt,
+        CAST(ISNULL(c.A_PComm, 0) AS int) AS A_PComm,
+        CAST(ISNULL(c.A_Amt, 10) AS int) AS A_Amt,
+        CAST(ISNULL(c.Patti, 0) AS int) AS Patti,
+        c.LC,
+        c.IsSelfComm,
+        ISNULL(
+          CAST(CAST(c.D_PComm AS float) AS varchar) + '/' + CAST(CAST(c.D_Amt AS float) AS varchar) + '-' +
+          CAST(CAST(c.A_PComm AS float) AS varchar) + '/' + CAST(CAST(c.A_Amt AS float) AS varchar) + '-' +
+          CAST(CAST(c.Patti AS float) AS varchar),
+          '0/100-0/10-0'
+        ) AS Rate
+      FROM Customers c
+      LEFT JOIN Users u ON c.Mobile = u.Mobile
+      WHERE (c.fUID = @uid OR c.fUID = '3' OR c.fUID = '95023' OR c.fUID = '95013' OR c.fUID = '4' OR c.fUID = '2')
+        ${filter ? "AND (c.CustomerName LIKE '%' + @filter + '%' OR c.Mobile LIKE '%' + @filter + '%')" : ""}
+      ORDER BY c.CustomerName ASC
+    `;
+    const data = await executeQuery(query, { uid: String(uid), filter });
+    res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -101,7 +121,7 @@ router.get('/customer-rates', requireAuth, async (req, res) => {
   try {
     const { cid } = req.query;
     if (!cid) return res.json({ success: true, data: [] });
-    const data = await executeQuery(
+    let data = await executeQuery(
       `SELECT CR.RateID, CR.CID, CR.fUID, CR.MobileNo, CR.D_PComm, CR.D_Amt, CR.A_PComm, CR.A_Amt, CR.Patti,
               ISNULL(CAST(CAST(CR.D_PComm AS float) AS varchar)+'/'+CAST(CAST(CR.D_Amt AS float) AS varchar)+'-'+CAST(CAST(CR.A_PComm AS float) AS varchar)+'/'+CAST(CAST(CR.A_Amt AS float) AS varchar)+'-'+CAST(CAST(CR.Patti AS float) AS varchar),'0/100-0/10-0') AS Rate,
               COALESCE((SELECT TOP 1 UID FROM Users WHERE Mobile=CR.MobileNo), (SELECT TOP 1 UID FROM Users WHERE Mobile=REPLACE(CR.MobileNo,' ','')), C.fUID, CR.fUID) AS fUserUID,
@@ -115,6 +135,21 @@ router.get('/customer-rates', requireAuth, async (req, res) => {
        WHERE CR.CID = @cid`,
       { cid: parseInt(cid) }
     );
+    if (!data || data.length === 0) {
+      data = await executeQuery(
+        `SELECT 0 AS RateID, C.CID, C.fUID, C.Mobile AS MobileNo, C.D_PComm, C.D_Amt, C.A_PComm, C.A_Amt, C.Patti,
+                ISNULL(CAST(CAST(C.D_PComm AS float) AS varchar)+'/'+CAST(CAST(C.D_Amt AS float) AS varchar)+'-'+CAST(CAST(C.A_PComm AS float) AS varchar)+'/'+CAST(CAST(C.A_Amt AS float) AS varchar)+'-'+CAST(CAST(C.Patti AS float) AS varchar),'0/100-0/10-0') AS Rate,
+                COALESCE((SELECT TOP 1 UID FROM Users WHERE Mobile=C.Mobile), (SELECT TOP 1 UID FROM Users WHERE Mobile=REPLACE(C.Mobile,' ','')), C.fUID) AS fUserUID,
+                ISNULL(C.ThirdPartyHissaID,0) AS ThirdPartyHissaID,
+                ISNULL(C.ThirdPartyHissaPer,0) AS ThirdPartyHissaPer,
+                ISNULL(C.ThirdPartyCommID,0) AS ThirdPartyCommID,
+                ISNULL(C.ThirdPartyDaraComm,0) AS ThirdPartyDaraComm,
+                ISNULL(C.ThirdPartyAkharComm,0) AS ThirdPartyAkharComm
+         FROM Customers C
+         WHERE C.CID = @cid`,
+        { cid: parseInt(cid) }
+      );
+    }
     res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

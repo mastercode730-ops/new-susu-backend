@@ -48,13 +48,36 @@ router.get('/games', requireAuth, async (req, res) => {
 router.get('/receivers', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
-    const assigned = await getAssignedClients(uid, req.user.SubUID);
-    let data = await executeStoredProcedure('FetchReceiverList', { fUID: uid, Filter: '' });
-    data = data || [];
-    if (assigned) {
-      data = data.filter(r => assigned.isMatch(r));
-    }
-    res.json({ success: true, data });
+    const filter = (req.query.filter || '').trim();
+    // Dashboard customer search: MUST NOT depend on AssignClientToStaff module.
+    // All customers across all accounts appear so anyone can search and make entries.
+    const query = `
+      SELECT DISTINCT
+        u.UID,
+        c.CustomerName,
+        c.CID,
+        c.Mobile,
+        CAST(ISNULL(c.D_PComm, 0) AS int) AS D_PComm,
+        CAST(ISNULL(c.D_Amt, 100) AS int) AS D_Amt,
+        CAST(ISNULL(c.A_PComm, 0) AS int) AS A_PComm,
+        CAST(ISNULL(c.A_Amt, 10) AS int) AS A_Amt,
+        CAST(ISNULL(c.Patti, 0) AS int) AS Patti,
+        c.LC,
+        c.IsSelfComm,
+        ISNULL(
+          CAST(CAST(c.D_PComm AS float) AS varchar) + '/' + CAST(CAST(c.D_Amt AS float) AS varchar) + '-' +
+          CAST(CAST(c.A_PComm AS float) AS varchar) + '/' + CAST(CAST(c.A_Amt AS float) AS varchar) + '-' +
+          CAST(CAST(c.Patti AS float) AS varchar),
+          '0/100-0/10-0'
+        ) AS Rate
+      FROM Customers c
+      LEFT JOIN Users u ON c.Mobile = u.Mobile
+      WHERE (c.fUID = @uid OR c.fUID = '3' OR c.fUID = '95023' OR c.fUID = '95013' OR c.fUID = '4' OR c.fUID = '2')
+        ${filter ? "AND (c.CustomerName LIKE '%' + @filter + '%' OR c.Mobile LIKE '%' + @filter + '%')" : ""}
+      ORDER BY c.CustomerName ASC
+    `;
+    const data = await executeQuery(query, { uid: String(uid), filter });
+    res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -133,14 +156,36 @@ router.post('/archive', requireAuth, async (req, res) => {
 router.get('/receiver-list', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
-    const filter = req.query.filter || '';
-    const assigned = await getAssignedClients(uid, req.user.SubUID);
-    let data = await executeStoredProcedure('FetchReceiverList', { fUID: String(uid), Filter: filter });
-    data = data || [];
-    if (assigned) {
-      data = data.filter(r => assigned.isMatch(r));
-    }
-    res.json({ success: true, data });
+    const filter = (req.query.filter || '').trim();
+    // Dashboard customer list: MUST NOT depend on AssignClientToStaff module.
+    // All customers across all accounts appear so anyone can make entries.
+    const query = `
+      SELECT DISTINCT
+        u.UID,
+        c.CustomerName,
+        c.CID,
+        c.Mobile,
+        CAST(ISNULL(c.D_PComm, 0) AS int) AS D_PComm,
+        CAST(ISNULL(c.D_Amt, 100) AS int) AS D_Amt,
+        CAST(ISNULL(c.A_PComm, 0) AS int) AS A_PComm,
+        CAST(ISNULL(c.A_Amt, 10) AS int) AS A_Amt,
+        CAST(ISNULL(c.Patti, 0) AS int) AS Patti,
+        c.LC,
+        c.IsSelfComm,
+        ISNULL(
+          CAST(CAST(c.D_PComm AS float) AS varchar) + '/' + CAST(CAST(c.D_Amt AS float) AS varchar) + '-' +
+          CAST(CAST(c.A_PComm AS float) AS varchar) + '/' + CAST(CAST(c.A_Amt AS float) AS varchar) + '-' +
+          CAST(CAST(c.Patti AS float) AS varchar),
+          '0/100-0/10-0'
+        ) AS Rate
+      FROM Customers c
+      LEFT JOIN Users u ON c.Mobile = u.Mobile
+      WHERE (c.fUID = @uid OR c.fUID = '3' OR c.fUID = '95023' OR c.fUID = '95013' OR c.fUID = '4' OR c.fUID = '2')
+        ${filter ? "AND (c.CustomerName LIKE '%' + @filter + '%' OR c.Mobile LIKE '%' + @filter + '%')" : ""}
+      ORDER BY c.CustomerName ASC
+    `;
+    const data = await executeQuery(query, { uid: String(uid), filter });
+    res.json({ success: true, data: data || [] });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
