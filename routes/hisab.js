@@ -34,19 +34,39 @@ router.get('/latest-date', requireAuth, async (req, res) => {
     const uid = req.user.UID;
     const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const rows = await executeQuery(
-      `SELECT MAX(MsgDate) AS MsgDate FROM Chat
-       WHERE fReceiverID=@uid AND IsAccepted='Accepted' AND IsTextChat='True' AND IsYantriStyle='True'
-         AND CAST(MsgDate AS date) <= CAST(DATEADD(minute, 330, GETUTCDATE()) AS date)`,
+      `SELECT MAX(d) AS MsgDate FROM (
+         SELECT MAX(MsgDate) AS d FROM Chat
+         WHERE (fReceiverID=@uid OR fSenderID=@uid)
+           AND CAST(MsgDate AS date) <= CAST(DATEADD(minute, 330, GETUTCDATE()) AS date)
+         UNION ALL
+         SELECT MAX(Date) AS d FROM Accounts
+         WHERE CreatedBy=@uid
+           AND CAST(Date AS date) <= CAST(DATEADD(minute, 330, GETUTCDATE()) AS date)
+         UNION ALL
+         SELECT MAX(Date) AS d FROM Result
+         WHERE CAST(Date AS date) <= CAST(DATEADD(minute, 330, GETUTCDATE()) AS date)
+         UNION ALL
+         SELECT MAX(MsgDate) AS d FROM Chat
+         WHERE CAST(MsgDate AS date) <= CAST(DATEADD(minute, 330, GETUTCDATE()) AS date)
+       ) AS T`,
       { uid }
     );
-    if (rows?.[0]?.MsgDate) {
-      const d = new Date(rows[0].MsgDate);
-      return res.json({ success: true, date: String(d.getDate()).padStart(2,'0') + '/' + MONTHS[d.getMonth()] + '/' + d.getFullYear() });
-    }
-    const ist = getIST();
-    res.json({ success: true, date: String(ist.getUTCDate()).padStart(2,'0') + '/' + MONTHS[ist.getUTCMonth()] + '/' + ist.getUTCFullYear() });
+    let d = rows?.[0]?.MsgDate ? new Date(rows[0].MsgDate) : getIST();
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const mon = MONTHS[d.getUTCMonth()];
+    const yyyy = d.getUTCFullYear();
+    const dateStr = `${dd}/${mon}/${yyyy}`;
+    const dmy = `${dd}/${mm}/${yyyy}`;
+    res.json({ success: true, date: dateStr, dmy, data: dmy, iso: `${yyyy}-${mm}-${dd}` });
   } catch (e) {
-    res.json({ success: true, date: null });
+    const ist = getIST();
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const dd = String(ist.getUTCDate()).padStart(2, '0');
+    const mm = String(ist.getUTCMonth() + 1).padStart(2, '0');
+    const mon = MONTHS[ist.getUTCMonth()];
+    const yyyy = ist.getUTCFullYear();
+    res.json({ success: true, date: `${dd}/${mon}/${yyyy}`, dmy: `${dd}/${mm}/${yyyy}`, data: `${dd}/${mm}/${yyyy}`, iso: `${yyyy}-${mm}-${dd}` });
   }
 });
 
