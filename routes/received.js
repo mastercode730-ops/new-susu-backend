@@ -105,7 +105,7 @@ router.get('/receiver-list', requireAuth, async (req, res) => {
         ) AS Rate
       FROM Customers c
       LEFT JOIN Users u ON c.Mobile = u.Mobile
-      WHERE (c.fUID = @uid OR c.fUID = '3' OR c.fUID = '95023' OR c.fUID = '95013' OR c.fUID = '4' OR c.fUID = '2')
+      WHERE c.fUID = @uid
         ${filter ? "AND (c.CustomerName LIKE '%' + @filter + '%' OR c.Mobile LIKE '%' + @filter + '%')" : ""}
       ORDER BY c.CustomerName ASC
     `;
