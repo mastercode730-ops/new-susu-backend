@@ -41,12 +41,6 @@ router.get('/latest-date', requireAuth, async (req, res) => {
          SELECT MAX(MsgDate) AS d FROM Chat
          WHERE (fReceiverID=@uid OR fSenderID=@uid)
            AND CAST(MsgDate AS date) <= CAST(DATEADD(minute, 330, GETUTCDATE()) AS date)
-         UNION ALL
-         SELECT MAX(Date) AS d FROM Result
-         WHERE CAST(Date AS date) <= CAST(DATEADD(minute, 330, GETUTCDATE()) AS date)
-         UNION ALL
-         SELECT MAX(Date) AS d FROM Accounts
-         WHERE CAST(Date AS date) <= CAST(DATEADD(minute, 330, GETUTCDATE()) AS date)
        ) AS T`,
       { uid }
     );
