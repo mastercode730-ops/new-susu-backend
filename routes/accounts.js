@@ -93,7 +93,7 @@ router.get('/subusers', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
     const data = await executeQuery(
-      `SELECT SubUserID, subusername FROM subusers WHERE fcreatedUID = @uid`,
+      `SELECT SubUserID, subusername, IsActive FROM subusers WHERE fcreatedUID = @uid AND (IsActive = 1 OR IsActive = 'True')`,
       { uid }
     );
     res.json({ success: true, data: data || [] });
