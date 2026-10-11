@@ -83,19 +83,20 @@ router.get('/data', requireAuth, async (req, res) => {
     } else if (mode === 'agent') {
       if (!agentUID || agentUID === '' || agentUID === '0')
         return res.json({ success: true, data: [] });
-      params = { date: parsedDate, uid, gid, agentUID };
+      params = { date: parsedDate, uid, gid, agentUID: String(agentUID).trim() };
+      const agentCond = `AND (fSenderID = @agentUID OR fSenderID IN (SELECT CAST(UID AS varchar) FROM Users WHERE Mobile IN (SELECT Mobile FROM Customers WHERE (CAST(CID AS varchar)=@agentUID OR Mobile=@agentUID) AND fUID=@uid)))`;
       if (rates && rates.trim() !== '') {
-        params.rates = rates;
+        params.rates = rates.replace(/\s+/g, '');
         sql = `SELECT Message, D_PComm, D_Amt, A_PComm, A_Amt, Pati_PComm, HissaPerc
                FROM Chat WHERE IsAccepted='Accepted' AND IsTextChat='True' AND IsYantriStyle='True'
                AND CAST(MsgDate AS date)=CAST(@date AS date) AND fReceiverID=@uid AND fGameID=@gid
-               AND fSenderID=@agentUID ${negCond}
-               AND (cast(cast(D_PComm as float) as varchar)+'/'+cast(cast(D_Amt as float) as varchar)+'-'+cast(cast(A_PComm as float) as varchar)+'/'+cast(cast(A_Amt as float) as varchar)+'-'+cast(cast(Pati_PComm as float) as varchar)=@rates)`;
+               ${agentCond} ${negCond}
+               AND (REPLACE(cast(cast(D_PComm as float) as varchar)+'/'+cast(cast(D_Amt as float) as varchar)+'-'+cast(cast(A_PComm as float) as varchar)+'/'+cast(cast(A_Amt as float) as varchar)+'-'+cast(cast(Pati_PComm as float) as varchar), ' ', '') = @rates)`;
       } else {
         sql = `SELECT Message, D_PComm, D_Amt, A_PComm, A_Amt, Pati_PComm, HissaPerc
                FROM Chat WHERE IsAccepted='Accepted' AND IsTextChat='True' AND IsYantriStyle='True'
                AND CAST(MsgDate AS date)=CAST(@date AS date) AND fReceiverID=@uid AND fGameID=@gid
-               AND fSenderID=@agentUID ${negCond}`;
+               ${agentCond} ${negCond}`;
       }
     } else if (mode === 'total') {
       sql = `SELECT Message, D_PComm, D_Amt, A_PComm, A_Amt, Pati_PComm, HissaPerc

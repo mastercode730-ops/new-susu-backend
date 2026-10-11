@@ -17,6 +17,7 @@ async function getAssignedClients(uid, subUID) {
   );
 
   const list = rows || [];
+  if (list.length === 0) return null;
   const cids = new Set(list.map(r => String(r.CID)));
   const mobiles = new Set(list.map(r => String(r.Mobile || '').replace(/\D/g, '')).filter(Boolean));
   const rawMobiles = new Set(list.map(r => String(r.Mobile || '').trim()).filter(Boolean));

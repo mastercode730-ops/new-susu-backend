@@ -72,13 +72,16 @@ router.get('/customers', requireAuth, async (req, res) => {
              FROM Customers INNER JOIN Users ON Customers.Mobile = Users.Mobile
              WHERE Customers.fUID = @uid`;
     if (subUID) {
-      qry = `SELECT Customers.CustomerName + ' ' + RIGHT(Customers.Mobile, 5) AS Name, Users.UID
-             FROM Customers
-             INNER JOIN Users ON Customers.Mobile = Users.Mobile
-             INNER JOIN AssignClientToStaff ON Customers.CID = AssignClientToStaff.fCustID
-               AND AssignClientToStaff.fStaffID = @subUID
-               AND (AssignClientToStaff.IsAssigned = 'True' OR AssignClientToStaff.IsAssigned = 1)
-             WHERE Customers.fUID = @uid`;
+      const assigned = await getAssignedClients(uid, subUID);
+      if (assigned) {
+        qry = `SELECT Customers.CustomerName + ' ' + RIGHT(Customers.Mobile, 5) AS Name, Users.UID
+               FROM Customers
+               INNER JOIN Users ON Customers.Mobile = Users.Mobile
+               INNER JOIN AssignClientToStaff ON Customers.CID = AssignClientToStaff.fCustID
+                 AND AssignClientToStaff.fStaffID = @subUID
+                 AND (AssignClientToStaff.IsAssigned = 'True' OR AssignClientToStaff.IsAssigned = 1)
+               WHERE Customers.fUID = @uid`;
+      }
     }
     const data = await executeQuery(qry, { uid, subUID });
     res.json({ success: true, data: data || [] });
