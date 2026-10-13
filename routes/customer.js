@@ -97,6 +97,33 @@ router.post('/', requireAuth, async (req, res) => {
       ThirdPartyAkharComm: parseFloat(thirdPartyAkharComm) || 0,
       ThirdPartyLCID: parseInt(thirdPartyLCID) || 0, ThirdPartyLCPer: parseFloat(thirdPartyLCPer) || 0
     });
+
+    // If added by a Sub-User, automatically assign the newly created customer to this sub-user
+    if (req.user && req.user.SubUID) {
+      try {
+        const custRows = await executeQuery(
+          `SELECT TOP 1 CID FROM Customers WHERE Mobile = @mob AND fUID = @uid ORDER BY CID DESC`,
+          { mob, uid }
+        );
+        if (custRows && custRows[0] && custRows[0].CID) {
+          const newCid = custRows[0].CID;
+          const exists = await executeQuery(
+            `SELECT 1 FROM AssignClientToStaff WHERE fStaffID = @staffID AND fCustID = @cid AND fUID = @uid`,
+            { staffID: req.user.SubUID, cid: newCid, uid }
+          );
+          if (!exists || exists.length === 0) {
+            await executeStoredProcedure('AssignClienttoSatff', {
+              fStaffID: req.user.SubUID,
+              fCustID: newCid,
+              fUID: uid
+            });
+          }
+        }
+      } catch (assignErr) {
+        console.error('Error auto-assigning customer to subuser:', assignErr);
+      }
+    }
+
     res.json({ success: true, message: 'Customer added' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
