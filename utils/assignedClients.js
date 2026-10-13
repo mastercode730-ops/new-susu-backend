@@ -7,6 +7,9 @@ const { executeQuery } = require('../config/database');
 async function getAssignedClients(uid, subUID) {
   if (!subUID) return null;
 
+  // Sub-user 121 manages everything on behalf of main user — all customers under main user are accessible
+  if (String(subUID) === '121') return null;
+
   const rows = await executeQuery(
     `SELECT c.CID, c.Mobile, c.CustomerName, u.UID AS CustUID
      FROM AssignClientToStaff a

@@ -124,6 +124,32 @@ router.post('/', requireAuth, async (req, res) => {
       }
     }
 
+    // SubUser 121 manages on behalf of parent UID 3 — auto-assign newly added customers to 121 as well
+    if (String(uid) === '3') {
+      try {
+        const custRows121 = await executeQuery(
+          `SELECT TOP 1 CID FROM Customers WHERE Mobile = @mob AND fUID = @uid ORDER BY CID DESC`,
+          { mob, uid }
+        );
+        if (custRows121 && custRows121[0] && custRows121[0].CID) {
+          const newCid121 = custRows121[0].CID;
+          const exists121 = await executeQuery(
+            `SELECT 1 FROM AssignClientToStaff WHERE fStaffID = 121 AND fCustID = @cid AND fUID = @uid`,
+            { cid: newCid121, uid }
+          );
+          if (!exists121 || exists121.length === 0) {
+            await executeStoredProcedure('AssignClienttoSatff', {
+              fStaffID: 121,
+              fCustID: newCid121,
+              fUID: uid
+            });
+          }
+        }
+      } catch (e121) {
+        console.error('Error auto-assigning customer to subuser 121:', e121);
+      }
+    }
+
     res.json({ success: true, message: 'Customer added' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
