@@ -68,22 +68,28 @@ router.get('/customers', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
     const subUID = req.user.SubUID || null;
-    let qry = `SELECT Customers.CustomerName + ' ' + RIGHT(Customers.Mobile, 5) AS Name, Users.UID
-             FROM Customers INNER JOIN Users ON Customers.Mobile = Users.Mobile
-             WHERE Customers.fUID = @uid`;
-    if (subUID) {
+    if (subUID && String(subUID) !== '121') {
       const assigned = await getAssignedClients(uid, subUID);
-      if (assigned) {
-        qry = `SELECT Customers.CustomerName + ' ' + RIGHT(Customers.Mobile, 5) AS Name, Users.UID
-               FROM Customers
-               INNER JOIN Users ON Customers.Mobile = Users.Mobile
-               INNER JOIN AssignClientToStaff ON Customers.CID = AssignClientToStaff.fCustID
-                 AND AssignClientToStaff.fStaffID = @subUID
-                 AND (AssignClientToStaff.IsAssigned = 'True' OR AssignClientToStaff.IsAssigned = 1)
-               WHERE Customers.fUID = @uid`;
+      if (!assigned || assigned.rows.length === 0) {
+        return res.json({ success: true, data: [] });
       }
+      const qry = `SELECT Customers.CustomerName + ' ' + RIGHT(Customers.Mobile, 5) AS Name, Users.UID
+                   FROM Customers
+                   INNER JOIN Users ON Customers.Mobile = Users.Mobile
+                   INNER JOIN AssignClientToStaff ON Customers.CID = AssignClientToStaff.fCustID
+                     AND AssignClientToStaff.fStaffID = @subUID
+                     AND (AssignClientToStaff.IsAssigned = 'True' OR AssignClientToStaff.IsAssigned = 1)
+                   WHERE Customers.fUID = @uid
+                   ORDER BY Customers.CustomerName ASC`;
+      const data = await executeQuery(qry, { uid, subUID });
+      return res.json({ success: true, data: data || [] });
     }
-    const data = await executeQuery(qry, { uid, subUID });
+
+    const qry = `SELECT Customers.CustomerName + ' ' + RIGHT(Customers.Mobile, 5) AS Name, Users.UID
+                 FROM Customers INNER JOIN Users ON Customers.Mobile = Users.Mobile
+                 WHERE Customers.fUID = @uid
+                 ORDER BY Customers.CustomerName ASC`;
+    const data = await executeQuery(qry, { uid });
     res.json({ success: true, data: data || [] });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
@@ -104,6 +110,7 @@ router.get('/subusers', requireAuth, async (req, res) => {
 router.get('/list', requireAuth, async (req, res) => {
   try {
     const uid = req.user.UID;
+    const subUID = req.user.SubUID || null;
     const fromDate = req.query.fromDate || req.query.fDate || '';
     const toDate = req.query.toDate || req.query.tDate || '';
     const rawStaff = req.query.staffUID !== undefined ? req.query.staffUID : req.query.staffID;
@@ -117,10 +124,20 @@ router.get('/list', requireAuth, async (req, res) => {
       params.fCID = (rawCust === 'Self' || rawCust === '0') ? 0 : rawCust;
     }
     let data = await executeStoredProcedure('ShowAllTransaction', params);
-    const assigned = await getAssignedClients(uid, req.user.SubUID);
-    if (assigned && data) {
-      data = data.filter(r => assigned.isMatch(r) || String(r.fCustID) === String(uid));
+
+    // If subuser (except 121 who has all access), filter to ONLY assigned customers
+    if (subUID && String(subUID) !== '121') {
+      const assigned = await getAssignedClients(uid, subUID);
+      if (!assigned || assigned.rows.length === 0) {
+        return res.json({ success: true, data: [] });
+      }
+      data = (data || []).filter(r => {
+        const custUID = String(r.fCustID || '');
+        const mob = String(r.Mobile || '').replace(/\D/g, '');
+        return (custUID && assigned.uids.has(custUID)) || (mob && assigned.mobiles.has(mob));
+      });
     }
+
     res.json({ success: true, data: data || [] });
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
