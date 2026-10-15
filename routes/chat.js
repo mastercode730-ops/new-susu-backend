@@ -21,6 +21,22 @@ function formatDateTime(date) {
   return `${d}-${m}-${y} ${String(h).padStart(2,'0')}:${min}:${sec} ${ampm}`;
 }
 
+const activeSubmissionLocks = new Set();
+
+function normalizeMessage(msg) {
+  if (!msg) return '';
+  const clean = String(msg).replace(/\r/g, '').replace(/\n/g, ',').trim();
+  if (clean.includes('=')) {
+    return clean
+      .split(',')
+      .map(t => t.trim().replace(/\s+/g, ''))
+      .filter(Boolean)
+      .sort()
+      .join(',');
+  }
+  return clean.replace(/\s+/g, ' ').toLowerCase();
+}
+
 // GET /api/chat/rates
 router.get('/rates', requireAuth, async (req, res) => {
   try {
@@ -222,89 +238,138 @@ router.post('/save-receiver-message', requireAuth, async (req, res) => {
       else formattedDate = String(date).substring(0, 10);
     }
 
-    // Resolve Hissa & TP settings with fallback to Customers master table if not provided
-    let effHissaID = parseInt(fHissaPartyID) || 0;
-    let effHissaPerc = parseFloat(HissaPerc) || 0;
-    let effTPCommID = parseInt(ThirdPartyCommID) || 0;
-    let effTPDara = parseFloat(ThirdPartyDaraComm) || 0;
-    let effTPAkhar = parseFloat(ThirdPartyAkharComm) || 0;
-
-    if (!effHissaID || !effHissaPerc) {
-      const custHissa = await executeQuery(
-        `SELECT TOP 1 ThirdPartyHissaID, ThirdPartyHissaPer, ThirdPartyCommID, ThirdPartyDaraComm, ThirdPartyAkharComm 
-         FROM Customers 
-         WHERE fUID = @uid AND (
-           Mobile = (SELECT TOP 1 Mobile FROM Users WHERE UID = @rxUID)
-           OR REPLACE(Mobile, ' ', '') = (SELECT TOP 1 REPLACE(Mobile, ' ', '') FROM Users WHERE UID = @rxUID)
-         )`,
-        { uid: parseInt(uid), rxUID: parseInt(resolvedReceiverUID) }
-      );
-      if (custHissa && custHissa.length > 0) {
-        if (!effHissaID && custHissa[0].ThirdPartyHissaID) effHissaID = parseInt(custHissa[0].ThirdPartyHissaID) || 0;
-        if (!effHissaPerc && custHissa[0].ThirdPartyHissaPer) effHissaPerc = parseFloat(custHissa[0].ThirdPartyHissaPer) || 0;
-        if (!effTPCommID && custHissa[0].ThirdPartyCommID) effTPCommID = parseInt(custHissa[0].ThirdPartyCommID) || 0;
-        if (!effTPDara && custHissa[0].ThirdPartyDaraComm) effTPDara = parseFloat(custHissa[0].ThirdPartyDaraComm) || 0;
-        if (!effTPAkhar && custHissa[0].ThirdPartyAkharComm) effTPAkhar = parseFloat(custHissa[0].ThirdPartyAkharComm) || 0;
-      }
+    // Resolve effective date for duplicate check (YYYY-MM-DD)
+    let effectiveDate = formattedDate;
+    if (!effectiveDate) {
+      const dStr = formatDateTime(indianTime);
+      const parts = dStr.split(' ')[0].split('-');
+      const months = { Jan:'01', Feb:'02', Mar:'03', Apr:'04', May:'05', Jun:'06', Jul:'07', Aug:'08', Sep:'09', Oct:'10', Nov:'11', Dec:'12' };
+      effectiveDate = `${parts[2]}-${months[parts[1]] || '01'}-${parts[0].padStart(2, '0')}`;
     }
 
-    // InsertChatMessageWhatsappLike expects @fHissaPartyID to be Customers.CID
-    if (effHissaID > 0) {
-      const checkC = await executeQuery(`SELECT TOP 1 CID FROM Customers WHERE CID = @effHissaID`, { effHissaID });
-      if (!checkC || checkC.length === 0) {
-        const fromU = await executeQuery(
-          `SELECT TOP 1 CID FROM Customers WHERE (
-            Mobile = (SELECT TOP 1 Mobile FROM Users WHERE UID = @effHissaID)
-            OR REPLACE(Mobile, ' ', '') = (SELECT TOP 1 REPLACE(Mobile, ' ', '') FROM Users WHERE UID = @effHissaID)
-          )`,
-          { effHissaID }
-        );
-        if (fromU && fromU.length > 0) effHissaID = fromU[0].CID;
-      }
+    // Prevent duplicate entries from the same user / sub-user for the same game, customer, date
+    const normMsg = normalizeMessage(message);
+    const lockKey = `${uid}_${subUID}_${gameId}_${resolvedReceiverUID}_${effectiveDate}_${normMsg}`;
+    if (activeSubmissionLocks.has(lockKey)) {
+      return res.json({ success: false, message: 'Duplicate Entry: Same entry already exists!' });
     }
+    activeSubmissionLocks.add(lockKey);
 
-    // Insert mode
-    await executeStoredProcedure('InsertChatMessageWhatsappLike', {
-      fSenderID: uid,
-      fGameID: gameId,
-      Message: message.replace(/\n/g, ','),
-      MessageDateTime: msgDateTime,
-      IsTextChat: 'True',
-      IsYantriStyle: isYantriStyle || 'False',
-      TotalAmount: parseFloat(totalAmount) || 0,
-      CheckAcceptedStatus: isYantriStyle === 'True',
-      IsSendByReceiver: false,
-      SUID: subUID,
-      fReceiverID: resolvedReceiverUID,
-      D_PComm: parseFloat(D_PComm) || 0,
-      D_Amt: parseFloat(D_Amt) || 100,
-      A_PComm: parseFloat(A_PComm) || 0,
-      A_Amt: parseFloat(A_Amt) || 10,
-      Pati_PComm: parseFloat(Pati_PComm) || 0,
-      fHissaPartyID: effHissaID || 0,
-      HissaPerc: parseFloat(effHissaPerc) || 0,
-      CurrentMsgDate: formattedDate,
-      ThirdPartyCommID: effTPCommID || 0,
-      ThirdPartyDaraComm: parseFloat(effTPDara) || 0,
-      ThirdPartyAkharComm: parseFloat(effTPAkhar) || 0
-    });
-
-    // If game result already exists on that date, immediately recalculate
-    if (formattedDate) {
-      try {
-        const { calculateGameResult } = require('../utils/resultCalculator');
-        const resRows = await executeQuery(
-          `SELECT Result FROM Result WHERE fGameID = @gid AND CAST(Date AS date) = CAST(@d AS date)`,
-          { gid: parseInt(gameId), d: formattedDate }
-        );
-        if (resRows && resRows.length > 0 && resRows[0].Result) {
-          await calculateGameResult(parseInt(gameId), formattedDate, resRows[0].Result, parseInt(uid));
+    try {
+      const existingRows = await executeQuery(
+        `SELECT ChatID, Message, TotalAmount 
+         FROM Chat 
+         WHERE fGameID = @gameId
+           AND CAST(MsgDate AS date) = CAST(@effectiveDate AS date)
+           AND (fSenderID = @custUID OR fReceiverID = @custUID)
+           AND (
+             (@subUID <> '' AND subuserID = @subUID)
+             OR ((@subUID = '' OR @subUID IS NULL) AND (subuserID = '' OR subuserID IS NULL) AND (fReceiverID = @uid OR fSenderID = @uid))
+           )
+           AND (IsAccepted IS NULL OR (IsAccepted <> 'Rejected' AND IsAccepted <> 'Cancelled'))`,
+        {
+          gameId: parseInt(gameId),
+          effectiveDate: effectiveDate,
+          custUID: parseInt(resolvedReceiverUID),
+          subUID: String(subUID || ''),
+          uid: parseInt(uid)
         }
-      } catch (calcErr) {
-        console.warn('Post-save calculateGameResult error:', calcErr.message);
+      );
+
+      if (existingRows && existingRows.length > 0) {
+        for (const row of existingRows) {
+          if (normalizeMessage(row.Message) === normMsg) {
+            return res.json({ success: false, message: 'Duplicate Entry: Same entry already exists!' });
+          }
+        }
       }
+
+      // Resolve Hissa & TP settings with fallback to Customers master table if not provided
+      let effHissaID = parseInt(fHissaPartyID) || 0;
+      let effHissaPerc = parseFloat(HissaPerc) || 0;
+      let effTPCommID = parseInt(ThirdPartyCommID) || 0;
+      let effTPDara = parseFloat(ThirdPartyDaraComm) || 0;
+      let effTPAkhar = parseFloat(ThirdPartyAkharComm) || 0;
+
+      if (!effHissaID || !effHissaPerc) {
+        const custHissa = await executeQuery(
+          `SELECT TOP 1 ThirdPartyHissaID, ThirdPartyHissaPer, ThirdPartyCommID, ThirdPartyDaraComm, ThirdPartyAkharComm 
+           FROM Customers 
+           WHERE fUID = @uid AND (
+             Mobile = (SELECT TOP 1 Mobile FROM Users WHERE UID = @rxUID)
+             OR REPLACE(Mobile, ' ', '') = (SELECT TOP 1 REPLACE(Mobile, ' ', '') FROM Users WHERE UID = @rxUID)
+           )`,
+          { uid: parseInt(uid), rxUID: parseInt(resolvedReceiverUID) }
+        );
+        if (custHissa && custHissa.length > 0) {
+          if (!effHissaID && custHissa[0].ThirdPartyHissaID) effHissaID = parseInt(custHissa[0].ThirdPartyHissaID) || 0;
+          if (!effHissaPerc && custHissa[0].ThirdPartyHissaPer) effHissaPerc = parseFloat(custHissa[0].ThirdPartyHissaPer) || 0;
+          if (!effTPCommID && custHissa[0].ThirdPartyCommID) effTPCommID = parseInt(custHissa[0].ThirdPartyCommID) || 0;
+          if (!effTPDara && custHissa[0].ThirdPartyDaraComm) effTPDara = parseFloat(custHissa[0].ThirdPartyDaraComm) || 0;
+          if (!effTPAkhar && custHissa[0].ThirdPartyAkharComm) effTPAkhar = parseFloat(custHissa[0].ThirdPartyAkharComm) || 0;
+        }
+      }
+
+      // InsertChatMessageWhatsappLike expects @fHissaPartyID to be Customers.CID
+      if (effHissaID > 0) {
+        const checkC = await executeQuery(`SELECT TOP 1 CID FROM Customers WHERE CID = @effHissaID`, { effHissaID });
+        if (!checkC || checkC.length === 0) {
+          const fromU = await executeQuery(
+            `SELECT TOP 1 CID FROM Customers WHERE (
+              Mobile = (SELECT TOP 1 Mobile FROM Users WHERE UID = @effHissaID)
+              OR REPLACE(Mobile, ' ', '') = (SELECT TOP 1 REPLACE(Mobile, ' ', '') FROM Users WHERE UID = @effHissaID)
+            )`,
+            { effHissaID }
+          );
+          if (fromU && fromU.length > 0) effHissaID = fromU[0].CID;
+        }
+      }
+
+      // Insert mode
+      await executeStoredProcedure('InsertChatMessageWhatsappLike', {
+        fSenderID: uid,
+        fGameID: gameId,
+        Message: message.replace(/\n/g, ','),
+        MessageDateTime: msgDateTime,
+        IsTextChat: 'True',
+        IsYantriStyle: isYantriStyle || 'False',
+        TotalAmount: parseFloat(totalAmount) || 0,
+        CheckAcceptedStatus: isYantriStyle === 'True',
+        IsSendByReceiver: false,
+        SUID: subUID,
+        fReceiverID: resolvedReceiverUID,
+        D_PComm: parseFloat(D_PComm) || 0,
+        D_Amt: parseFloat(D_Amt) || 100,
+        A_PComm: parseFloat(A_PComm) || 0,
+        A_Amt: parseFloat(A_Amt) || 10,
+        Pati_PComm: parseFloat(Pati_PComm) || 0,
+        fHissaPartyID: effHissaID || 0,
+        HissaPerc: parseFloat(effHissaPerc) || 0,
+        CurrentMsgDate: formattedDate,
+        ThirdPartyCommID: effTPCommID || 0,
+        ThirdPartyDaraComm: parseFloat(effTPDara) || 0,
+        ThirdPartyAkharComm: parseFloat(effTPAkhar) || 0
+      });
+
+      // If game result already exists on that date, immediately recalculate
+      if (formattedDate) {
+        try {
+          const { calculateGameResult } = require('../utils/resultCalculator');
+          const resRows = await executeQuery(
+            `SELECT Result FROM Result WHERE fGameID = @gid AND CAST(Date AS date) = CAST(@d AS date)`,
+            { gid: parseInt(gameId), d: formattedDate }
+          );
+          if (resRows && resRows.length > 0 && resRows[0].Result) {
+            await calculateGameResult(parseInt(gameId), formattedDate, resRows[0].Result, parseInt(uid));
+          }
+        } catch (calcErr) {
+          console.warn('Post-save calculateGameResult error:', calcErr.message);
+        }
+      }
+      res.json({ success: true, message: 'SuccessFully' });
+    } finally {
+      activeSubmissionLocks.delete(lockKey);
     }
-    res.json({ success: true, message: 'SuccessFully' });
   } catch (err) {
     console.error('save-receiver-message:', err.message);
     res.status(500).json({ success: false, message: err.message });
